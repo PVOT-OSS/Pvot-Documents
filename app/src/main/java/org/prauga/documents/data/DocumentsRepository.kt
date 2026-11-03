@@ -2,6 +2,7 @@ package org.prauga.documents.data
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -114,6 +115,22 @@ class DocumentsRepository(private val context: Context) {
     /** Deletes [trashed]'s copy for good. */
     suspend fun deleteForever(trashed: DocumentEntry) =
         withContext(Dispatchers.IO) { deleteOwnCopy(trashed.uri) }
+
+    /**
+     * Renames [document] to [newName]. Some providers change a document's URI on rename rather
+     * than keeping it, so this reports success only — the caller re-lists its folder afterward
+     * instead of trying to track the new URI itself.
+     */
+    suspend fun renameDocument(document: DocumentEntry, newName: String): Boolean =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                DocumentsContract.renameDocument(
+                    context.contentResolver,
+                    document.uri,
+                    newName
+                ) != null
+            }.getOrDefault(false)
+        }
 
     /** Copies [uri] into its own timestamped subfolder under `filesDir/$baseDirName/`, so the file
      * on disk keeps [displayName] exactly rather than a deduplicating prefix — the name shared

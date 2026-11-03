@@ -19,13 +19,26 @@
     <string name="manage_section_folders">Folders</string>
     <string name="manage_section_documents">Documents</string>
     <string name="manage_no_documents">No documents in these folders yet.</string>
+    <string name="manage_no_search_results">No documents match your search.</string>
+    <string name="manage_search_placeholder">Search documents</string>
+    <string name="manage_search_clear">Clear search</string>
+    <string name="manage_sort_name">Name</string>
+    <string name="manage_sort_date">Date</string>
+    <string name="manage_sort_size">Size</string>
     <string name="manage_open_unsupported">Opening documents comes in a later update</string>
     <string name="manage_share_document">Share %1$s</string>
-    <string name="manage_delete_document">Delete %1$s</string>
     <string name="manage_moved_to_trash">Moved to Recently deleted</string>
     <string name="manage_delete_failed">Couldn\'t delete this document</string>
     <string name="manage_recently_deleted">Recently deleted (%1$d)</string>
     <string name="manage_recently_deleted_title">Recently deleted</string>
+    <string name="manage_document_actions">More actions for %1$s</string>
+    <string name="manage_share_document_action">Share</string>
+    <string name="manage_rename_document_action">Rename</string>
+    <string name="manage_delete_document_action">Delete</string>
+    <string name="manage_rename_title">Rename document</string>
+    <string name="manage_rename_cancel">Cancel</string>
+    <string name="manage_rename_save">Save</string>
+    <string name="manage_rename_failed">Couldn\'t rename this document</string>
 
     <string name="trash_empty">Deleted documents will show up here.</string>
     <string name="trash_restore_document">Restore %1$s</string>
