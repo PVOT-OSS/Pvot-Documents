@@ -113,7 +113,7 @@ fun AppShell(preferences: AppPreferences) {
         val topPadding = padding.calculateTopPadding()
 
         when (selectedTab) {
-            0 -> RecentScreen(listState, topPadding, screenModifier)
+            0 -> RecentScreen(preferences, listState, topPadding, showMessage, screenModifier)
             1 -> ToolsScreen(listState, topPadding, screenModifier)
             2 -> ManageScreen(preferences, listState, topPadding, showMessage, screenModifier)
             else -> SettingsScreen(preferences, listState, topPadding, screenModifier)

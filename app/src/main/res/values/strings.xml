@@ -20,6 +20,23 @@
     <string name="manage_section_documents">Documents</string>
     <string name="manage_no_documents">No documents in these folders yet.</string>
     <string name="manage_open_unsupported">Opening documents comes in a later update</string>
+    <string name="manage_share_document">Share %1$s</string>
+    <string name="manage_delete_document">Delete %1$s</string>
+    <string name="manage_moved_to_trash">Moved to Recently deleted</string>
+    <string name="manage_delete_failed">Couldn\'t delete this document</string>
+    <string name="manage_recently_deleted">Recently deleted (%1$d)</string>
+    <string name="manage_recently_deleted_title">Recently deleted</string>
+
+    <string name="trash_empty">Deleted documents will show up here.</string>
+    <string name="trash_restore_document">Restore %1$s</string>
+    <string name="trash_delete_forever">Delete %1$s for good</string>
+    <string name="trash_restore_failed">Couldn\'t restore this document; its folder may no longer be added</string>
+
+    <string name="incoming_default_name">Document</string>
+    <string name="incoming_autosave_title">Save a copy?</string>
+    <string name="incoming_autosave_message">\"%1$s\" was opened from another app. Save a copy in Documents, or just add it to Recent for this session? You can change this anytime in Settings.</string>
+    <string name="incoming_autosave_save">Save a copy</string>
+    <string name="incoming_autosave_dont_save">Don\'t save</string>
 
     <string name="onboarding_title">Set up your folders</string>
     <string name="onboarding_subtitle">Documents stays private: it only reads the folders you allow, and nothing else on your phone. Add the common ones now, or add any folder later from Manage.</string>
@@ -41,6 +58,9 @@
     <string name="settings_glass_subtitle_blur">Frosted blur; this device can\'t draw the full lens effect</string>
     <string name="settings_glass_subtitle_flat">This device can\'t draw glass; bars stay solid</string>
     <string name="settings_glass_reduced">Reduced for battery saver right now</string>
+    <string name="settings_section_open_with">Open with</string>
+    <string name="settings_autosave_title">Save a copy automatically</string>
+    <string name="settings_autosave_summary">When a document is opened from another app, keep a copy in Documents instead of asking each time</string>
     <string name="settings_section_about">About</string>
     <string name="settings_version_title">Version</string>
 </resources>

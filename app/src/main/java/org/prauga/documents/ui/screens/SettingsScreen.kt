@@ -77,7 +77,7 @@ fun SettingsScreen(
         }
         item {
             PvotSectionHeader(
-                title = stringResource(R.string.settings_section_about),
+                title = stringResource(R.string.settings_section_open_with),
                 modifier = Modifier
                     .fillMaxWidth()
                     .pvotReveal(3)
@@ -85,6 +85,28 @@ fun SettingsScreen(
         }
         item {
             PvotListGroup(modifier = Modifier.fillMaxWidth().pvotReveal(4)) {
+                item {
+                    PvotSwitchRow(
+                        title = stringResource(R.string.settings_autosave_title),
+                        summary = stringResource(R.string.settings_autosave_summary),
+                        // A document opened before this is ever shown defaults to the common
+                        // choice; the switch pins it explicitly the first time it's touched.
+                        checked = preferences.autosaveOpenedDocuments ?: true,
+                        onCheckedChange = preferences::setAutosaveOpenedDocuments
+                    )
+                }
+            }
+        }
+        item {
+            PvotSectionHeader(
+                title = stringResource(R.string.settings_section_about),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .pvotReveal(5)
+            )
+        }
+        item {
+            PvotListGroup(modifier = Modifier.fillMaxWidth().pvotReveal(6)) {
                 item {
                     PvotPreferenceRow(
                         title = stringResource(R.string.settings_version_title),

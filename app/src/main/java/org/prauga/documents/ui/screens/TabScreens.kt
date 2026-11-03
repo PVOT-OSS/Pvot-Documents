@@ -15,15 +15,8 @@ import com.prauga.pvot.designsystem.components.PvotScreen
 import com.prauga.pvot.designsystem.components.PvotScreenDefaults
 import org.prauga.documents.R
 
-// Phase 0 placeholders: each tab is its scrolling screen with only the empty state in it.
-// - Recent fills in with the rest of phase 1 (recents, filter chips, "Open with").
-// - Tools fills in with the scanner (phase 5) and PDF/conversion tools (phase 4).
-// Manage has its own screen now: ManageScreen.kt.
-
-@Composable
-fun RecentScreen(state: LazyListState, topPadding: Dp, modifier: Modifier = Modifier) {
-    EmptyTab(state, topPadding, R.drawable.ic_recent, stringResource(R.string.recent_empty), modifier)
-}
+// Phase 0 placeholder: Tools fills in with the scanner (phase 5) and PDF/conversion tools
+// (phase 4). Recent has its own screen now: RecentScreen.kt. Manage has its own: ManageScreen.kt.
 
 @Composable
 fun ToolsScreen(state: LazyListState, topPadding: Dp, modifier: Modifier = Modifier) {
@@ -31,7 +24,7 @@ fun ToolsScreen(state: LazyListState, topPadding: Dp, modifier: Modifier = Modif
 }
 
 @Composable
-private fun EmptyTab(
+internal fun EmptyTab(
     state: LazyListState,
     topPadding: Dp,
     @DrawableRes iconRes: Int,
