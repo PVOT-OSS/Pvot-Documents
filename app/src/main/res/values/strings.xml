@@ -14,6 +14,22 @@
     <string name="recent_empty">Documents you open will show up here.</string>
     <string name="tools_empty">Scan a document or convert a file to get started.</string>
     <string name="manage_empty">Add a folder to see the documents in it.</string>
+    <string name="manage_add_folder">Add folder</string>
+    <string name="manage_remove_folder">Remove %1$s</string>
+    <string name="manage_section_folders">Folders</string>
+    <string name="manage_section_documents">Documents</string>
+    <string name="manage_no_documents">No documents in these folders yet.</string>
+    <string name="manage_open_unsupported">Opening documents comes in a later update</string>
+
+    <string name="onboarding_title">Set up your folders</string>
+    <string name="onboarding_subtitle">Documents stays private: it only reads the folders you allow, and nothing else on your phone. Add the common ones now, or add any folder later from Manage.</string>
+    <string name="onboarding_documents_title">Documents</string>
+    <string name="onboarding_documents_subtitle">Files you saved or received as documents</string>
+    <string name="onboarding_downloads_title">Downloads</string>
+    <string name="onboarding_downloads_subtitle">Files downloaded from the browser and other apps</string>
+    <string name="onboarding_allow">Allow</string>
+    <string name="onboarding_added">Added</string>
+    <string name="onboarding_continue">Continue</string>
 
     <string name="settings_section_appearance">Appearance</string>
     <string name="settings_grid_title">Grid view</string>

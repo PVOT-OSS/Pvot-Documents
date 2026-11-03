@@ -16,9 +16,9 @@ import com.prauga.pvot.designsystem.components.PvotScreenDefaults
 import org.prauga.documents.R
 
 // Phase 0 placeholders: each tab is its scrolling screen with only the empty state in it.
-// - Recent fills in with phase 1 (the document library and "Open with").
+// - Recent fills in with the rest of phase 1 (recents, filter chips, "Open with").
 // - Tools fills in with the scanner (phase 5) and PDF/conversion tools (phase 4).
-// - Manage fills in with phase 1 (folders, sources) and later recently-deleted.
+// Manage has its own screen now: ManageScreen.kt.
 
 @Composable
 fun RecentScreen(state: LazyListState, topPadding: Dp, modifier: Modifier = Modifier) {
@@ -28,11 +28,6 @@ fun RecentScreen(state: LazyListState, topPadding: Dp, modifier: Modifier = Modi
 @Composable
 fun ToolsScreen(state: LazyListState, topPadding: Dp, modifier: Modifier = Modifier) {
     EmptyTab(state, topPadding, R.drawable.ic_tools, stringResource(R.string.tools_empty), modifier)
-}
-
-@Composable
-fun ManageScreen(state: LazyListState, topPadding: Dp, modifier: Modifier = Modifier) {
-    EmptyTab(state, topPadding, R.drawable.ic_folder, stringResource(R.string.manage_empty), modifier)
 }
 
 @Composable

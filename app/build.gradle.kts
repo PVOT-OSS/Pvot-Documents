@@ -51,6 +51,7 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
+    implementation(libs.androidx.documentfile)
 
     implementation(libs.pvot.design.system)
     implementation(libs.pvot.core.ui)
