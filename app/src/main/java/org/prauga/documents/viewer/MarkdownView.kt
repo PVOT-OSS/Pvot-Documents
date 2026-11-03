@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -42,16 +43,18 @@ import org.prauga.documents.util.parseMarkdown
 fun MarkdownView(text: String, topPadding: Dp, modifier: Modifier = Modifier) {
     val blocks = remember(text) { parseMarkdown(text) }
     val linkColor = MaterialTheme.colorScheme.primary
-    LazyColumn(
-        modifier = modifier,
-        contentPadding = PaddingValues(
-            top = topPadding + PvotSpacing.L,
-            start = PvotSpacing.L,
-            end = PvotSpacing.L,
-            bottom = PvotSpacing.L
-        )
-    ) {
-        items(blocks) { block -> MarkdownBlockView(block = block, linkColor = linkColor) }
+    SelectionContainer {
+        LazyColumn(
+            modifier = modifier,
+            contentPadding = PaddingValues(
+                top = topPadding + PvotSpacing.L,
+                start = PvotSpacing.L,
+                end = PvotSpacing.L,
+                bottom = PvotSpacing.L
+            )
+        ) {
+            items(blocks) { block -> MarkdownBlockView(block = block, linkColor = linkColor) }
+        }
     }
 }
 

@@ -6,6 +6,9 @@ import android.graphics.Color as AndroidColor
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,13 +18,17 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -85,15 +92,61 @@ fun PdfView(uri: Uri, topPadding: Dp, modifier: Modifier = Modifier) {
         ) {
             items(current.data) { page ->
                 PvotCard(modifier = Modifier.fillMaxWidth().padding(bottom = PvotSpacing.M)) {
-                    Image(
-                        bitmap = page.asImageBitmap(),
-                        contentDescription = null,
-                        contentScale = ContentScale.FillWidth,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    val zoom = remember(page) { PageZoomState() }
+                    Box(modifier = Modifier.fillMaxWidth().clipToBounds()) {
+                        Image(
+                            bitmap = page.asImageBitmap(),
+                            contentDescription = null,
+                            contentScale = ContentScale.FillWidth,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .graphicsLayer(
+                                    scaleX = zoom.scale,
+                                    scaleY = zoom.scale,
+                                    translationX = zoom.offsetX,
+                                    translationY = zoom.offsetY
+                                )
+                                .pinchZoom(zoom)
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+/** A page's zoom level and pan offset, reset whenever the page's own [remember] key changes —
+ * each page keeps its own zoom rather than sharing one across the whole scrolling strip. */
+private class PageZoomState {
+    var scale by mutableFloatStateOf(1f)
+    var offsetX by mutableFloatStateOf(0f)
+    var offsetY by mutableFloatStateOf(0f)
+}
+
+private const val MaxPageZoom = 5f
+
+/** Two-finger pinch-to-zoom and pan on [zoom], one-finger drags left untouched so the page list
+ * keeps scrolling normally. Only consumes pointer events once a second finger is down — a plain
+ * scroll never reaches this gesture detector's zoom/pan branch, so there's nothing to arbitrate
+ * with the enclosing [androidx.compose.foundation.lazy.LazyColumn]'s own scroll handling. */
+private fun Modifier.pinchZoom(zoom: PageZoomState): Modifier = this.pointerInput(Unit) {
+    awaitEachGesture {
+        do {
+            val event = awaitPointerEvent()
+            if (event.changes.size >= 2) {
+                val zoomChange = event.calculateZoom()
+                val panChange = event.calculatePan()
+                zoom.scale = (zoom.scale * zoomChange).coerceIn(1f, MaxPageZoom)
+                if (zoom.scale > 1f) {
+                    zoom.offsetX += panChange.x
+                    zoom.offsetY += panChange.y
+                } else {
+                    zoom.offsetX = 0f
+                    zoom.offsetY = 0f
+                }
+                event.changes.forEach { it.consume() }
+            }
+        } while (event.changes.any { it.pressed })
     }
 }
 

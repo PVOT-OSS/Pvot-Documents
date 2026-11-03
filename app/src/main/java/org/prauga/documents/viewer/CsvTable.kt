@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -29,14 +30,16 @@ import com.prauga.pvot.designsystem.theme.PvotSpacing
 @Composable
 fun CsvTable(rows: List<List<String>>, topPadding: Dp, modifier: Modifier = Modifier) {
     if (rows.isEmpty()) return
-    Column(
-        modifier = modifier
-            .padding(top = topPadding)
-            .verticalScroll(rememberScrollState())
-            .horizontalScroll(rememberScrollState())
-    ) {
-        rows.forEachIndexed { index, cells ->
-            CsvRow(cells = cells, header = index == 0)
+    SelectionContainer {
+        Column(
+            modifier = modifier
+                .padding(top = topPadding)
+                .verticalScroll(rememberScrollState())
+                .horizontalScroll(rememberScrollState())
+        ) {
+            rows.forEachIndexed { index, cells ->
+                CsvRow(cells = cells, header = index == 0)
+            }
         }
     }
 }
