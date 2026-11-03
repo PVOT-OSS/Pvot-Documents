@@ -66,11 +66,24 @@ fun PdfView(uri: Uri, topPadding: Dp, modifier: Modifier = Modifier) {
             )
         }
 
-        is UiState.Success -> PdfViewer(
-            pdfDocument = current.data,
-            state = rememberPdfViewerState(),
-            modifier = modifier,
-            contentPadding = PaddingValues(top = topPadding)
-        )
+        is UiState.Success -> {
+            // The page's own fit-to-width zoom, captured once it's known, so pinch-zoom can't
+            // shrink the page below how it first opened — only the library's generous default
+            // floor applies before that, for the one frame it takes to find out.
+            var fitZoom by remember(current.data) { mutableStateOf<Float?>(null) }
+            val viewerState = rememberPdfViewerState()
+            PdfViewer(
+                pdfDocument = current.data,
+                state = viewerState,
+                modifier = modifier,
+                contentPadding = PaddingValues(top = topPadding),
+                minZoom = fitZoom ?: PlaceholderMinZoom,
+                onFirstContentLoad = { fitZoom = viewerState.zoom }
+            )
+        }
     }
 }
+
+/** A generous floor used only for the one frame between a page's first layout and its real
+ * fit-to-width zoom being known — never a floor the user actually reaches. */
+private const val PlaceholderMinZoom = 0.1f

@@ -50,7 +50,7 @@ fun DocumentViewerScreen(
     onBack: () -> Unit
 ) {
     PvotScreenScaffold(
-        topBar = { PvotTopBar(title = name, onBack = onBack) }
+        topBar = { PvotTopBar(title = name, onBack = onBack, compact = true) }
     ) { padding ->
         if (format == ViewerFormat.Pdf) {
             PdfView(
