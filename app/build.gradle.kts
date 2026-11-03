@@ -14,7 +14,7 @@ android {
 
     defaultConfig {
         applicationId = "org.prauga.documents"
-        minSdk = 27
+        minSdk = 28
         targetSdk = 36
         versionCode = computedVersionCode
         versionName = computedVersionName
@@ -52,6 +52,8 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.documentfile)
+    implementation(libs.androidx.pdf.compose)
+    implementation(libs.androidx.pdf.document.service)
 
     implementation(libs.pvot.design.system)
     implementation(libs.pvot.core.ui)

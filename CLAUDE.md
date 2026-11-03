@@ -29,8 +29,9 @@ if it has to be app-local for now, keep it small and list it under "Open items".
   URI permissions. No storage permission and no `MANAGE_EXTERNAL_STORAGE` for now; "All files
   access" may come later as an option.
 - **Fully free software.** Every dependency must be open source and F-Droid friendly: no Google Play
-  Services, no ML Kit. Planned: PDFium for rendering, PdfBox-Android for writing PDFs, OpenCV and
-  Tesseract for the scanner. AGPL libraries (MuPDF) are out.
+  Services, no ML Kit. PDF viewing is `androidx.pdf` (Apache-2.0, Google's own PDF engine — gives
+  real text selection, search and hyperlinks for free). Planned: PdfBox-Android for writing PDFs,
+  OpenCV and Tesseract for the scanner. AGPL libraries (MuPDF) are out.
 - **No network.** The app does not ask for `INTERNET`. Any AI feature is on-device and comes last.
 - **Office formats are view-only** in v1, through small parsers of our own rather than a bundled
   office suite.
@@ -82,8 +83,9 @@ app/src/main/java/org/prauga/documents/
 
 ## Toolchain
 
-AGP 9.5.0, Kotlin 2.4.21, Java 21, Gradle 9.6.1, compile SDK 37.1, target SDK 36, min SDK 27
-(PvotLib's floor). CI is `PVOT-OSS/workflows` `android-build.yml` with `java-version: '21'` and runs
+AGP 9.5.0, Kotlin 2.4.21, Java 21, Gradle 9.6.1, compile SDK 37.1, target SDK 36, min SDK 28
+(above PvotLib's own floor of 27 — raised for `androidx.pdf`, whose rendering requires 28+). CI is
+`PVOT-OSS/workflows` `android-build.yml` with `java-version: '21'` and runs
 `assembleDebug assembleRelease lint`.
 
 ## Commands
