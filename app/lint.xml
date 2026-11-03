@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- Flagged inside org.bouncycastle:bcpkix-jdk15to18's own compiled classes, pulled in
+         transitively by PdfBox-Android for encrypted-PDF support — not our code, and not
+         reachable here: the app has no INTERNET permission and makes no network connections, so
+         this TrustManager stub is never exercised as a network trust path. -->
+    <issue id="TrustAllX509TrustManager" severity="ignore" />
+</lint>

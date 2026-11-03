@@ -2,9 +2,4 @@
 <resources>
 
     <style name="Theme.Documents" parent="android:Theme.Material.Light.NoActionBar" />
-
-    <!-- DocumentViewerActivity's own theme: PdfViewerFragment's internal layout is a View, not
-         Compose, and its TextViews read Material Components text-appearance attributes that
-         don't exist on the plain platform theme above — it crashes inflating them without this. -->
-    <style name="Theme.Documents.PdfViewer" parent="Theme.Material3.DayNight.NoActionBar" />
 </resources>

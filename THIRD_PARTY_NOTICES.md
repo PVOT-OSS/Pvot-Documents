@@ -1,11 +1,11 @@
 # Third-party notices
 
-## Jetpack PDF (androidx.pdf)
+## PdfBox-Android
 
 The PDF viewer (`app/src/main/java/org/prauga/documents/viewer/PdfView.kt`) renders through
-[androidx.pdf](https://developer.android.com/jetpack/androidx/releases/pdf), Google's open-source
-PDF library (`pdf-compose`, `pdf-document-service`), Apache License 2.0. The license text is in
-`LICENSES/Apache-2.0.txt`.
+[PdfBox-Android](https://github.com/TomRoush/PdfBox-Android), a port of Apache PDFBox, Apache
+License 2.0. It renders entirely in-process, which is why it's used instead of the platform's
+sandboxed PDF renderer. The license text is in `LICENSES/Apache-2.0.txt`.
 
 ## Tabler Icons
 
