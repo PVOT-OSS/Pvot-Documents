@@ -16,7 +16,16 @@ enum class ViewerFormat {
     Json,
 
     /** Parsed into rows and shown as a scrollable table. */
-    Csv
+    Csv,
+
+    /** Parsed into blocks and shown as rendered headings, lists, code fences and the rest. */
+    Markdown,
+
+    /** Rendered through the platform's own HTML parser, shown as styled, scrollable text. */
+    Html,
+
+    /** Rasterized page by page through the platform's own renderer. */
+    Pdf
 }
 
 private val CodeExtensions = setOf(
@@ -33,9 +42,15 @@ fun viewerFormat(name: String, mimeType: String): ViewerFormat? {
         extension == "txt" -> ViewerFormat.PlainText
         extension == "json" -> ViewerFormat.Json
         extension == "csv" -> ViewerFormat.Csv
+        extension == "md" || extension == "markdown" -> ViewerFormat.Markdown
+        extension == "html" || extension == "htm" -> ViewerFormat.Html
+        extension == "pdf" -> ViewerFormat.Pdf
         extension in CodeExtensions -> ViewerFormat.Code
         mimeType == "application/json" -> ViewerFormat.Json
         mimeType == "text/csv" || mimeType == "application/csv" -> ViewerFormat.Csv
+        mimeType == "text/markdown" -> ViewerFormat.Markdown
+        mimeType == "text/html" -> ViewerFormat.Html
+        mimeType == "application/pdf" -> ViewerFormat.Pdf
         mimeType.startsWith("text/") -> ViewerFormat.PlainText
         else -> null
     }

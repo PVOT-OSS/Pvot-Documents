@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.Dp
 import com.prauga.pvot.coreui.PvotErrorContent
 import com.prauga.pvot.coreui.PvotLoadingContent
 import com.prauga.pvot.coreui.UiState
@@ -36,7 +37,10 @@ import org.prauga.documents.util.ViewerFormat
 import org.prauga.documents.util.parseCsv
 
 /** Reads [uri] as [format] and shows it: plain text, code and JSON as scrollable text, CSV as a
- * table. [name] is just the title, read once from the caller rather than re-resolved here. */
+ * table, Markdown and HTML as rendered styled text, PDF page by page. [name] is just the title,
+ * read once from the caller rather than re-resolved here. PDF reads [uri] directly as a file
+ * descriptor rather than as decoded text, so it gets its own content branch below, skipping the
+ * text-loading state the other formats share. */
 @Composable
 fun DocumentViewerScreen(
     uri: Uri,
@@ -44,10 +48,27 @@ fun DocumentViewerScreen(
     format: ViewerFormat,
     onBack: () -> Unit
 ) {
+    PvotScreenScaffold(
+        topBar = { PvotTopBar(title = name, onBack = onBack) }
+    ) { padding ->
+        if (format == ViewerFormat.Pdf) {
+            PdfView(
+                uri = uri,
+                topPadding = padding.calculateTopPadding(),
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            TextDocumentContent(uri = uri, format = format, topPadding = padding.calculateTopPadding())
+        }
+    }
+}
+
+@Composable
+private fun TextDocumentContent(uri: Uri, format: ViewerFormat, topPadding: Dp) {
     val context = LocalContext.current
     val repository = remember { DocumentsRepository(context) }
     val scope = rememberCoroutineScope()
-    var state by remember { mutableStateOf<UiState<String>>(UiState.Loading) }
+    var state by remember(uri) { mutableStateOf<UiState<String>>(UiState.Loading) }
     val readFailedMessage = stringResource(R.string.viewer_read_failed)
 
     suspend fun load() {
@@ -62,50 +83,58 @@ fun DocumentViewerScreen(
 
     LaunchedEffect(uri) { load() }
 
-    PvotScreenScaffold(
-        topBar = { PvotTopBar(title = name, onBack = onBack) }
-    ) { padding ->
-        when (val current = state) {
-            is UiState.Loading -> Box(
-                modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
-                contentAlignment = Alignment.Center
-            ) { PvotLoadingContent() }
+    when (val current = state) {
+        is UiState.Loading -> Box(
+            modifier = Modifier.fillMaxSize().padding(top = topPadding),
+            contentAlignment = Alignment.Center
+        ) { PvotLoadingContent() }
 
-            is UiState.Error -> Box(
-                modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
-                contentAlignment = Alignment.Center
-            ) {
-                PvotErrorContent(
-                    title = stringResource(R.string.viewer_read_failed),
-                    message = current.cause?.message.orEmpty(),
-                    onRetry = { scope.launch { load() } }
-                )
-            }
+        is UiState.Error -> Box(
+            modifier = Modifier.fillMaxSize().padding(top = topPadding),
+            contentAlignment = Alignment.Center
+        ) {
+            PvotErrorContent(
+                title = stringResource(R.string.viewer_read_failed),
+                message = current.cause?.message.orEmpty(),
+                onRetry = { scope.launch { load() } }
+            )
+        }
 
-            is UiState.Success -> if (format == ViewerFormat.Csv) {
-                CsvTable(
-                    rows = remember(current.data) { parseCsv(current.data) },
-                    topPadding = padding.calculateTopPadding(),
-                    modifier = Modifier.fillMaxSize()
+        is UiState.Success -> if (format == ViewerFormat.Csv) {
+            CsvTable(
+                rows = remember(current.data) { parseCsv(current.data) },
+                topPadding = topPadding,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else if (format == ViewerFormat.Markdown) {
+            MarkdownView(
+                text = current.data,
+                topPadding = topPadding,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else if (format == ViewerFormat.Html) {
+            HtmlView(
+                html = current.data,
+                topPadding = topPadding,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            SelectionContainer {
+                Text(
+                    text = current.data,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    fontFamily = if (format == ViewerFormat.Json || format == ViewerFormat.Code) {
+                        FontFamily.Monospace
+                    } else {
+                        FontFamily.Default
+                    },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = topPadding)
+                        .verticalScroll(rememberScrollState())
+                        .padding(PvotSpacing.L)
                 )
-            } else {
-                SelectionContainer {
-                    Text(
-                        text = current.data,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        fontFamily = if (format == ViewerFormat.Json || format == ViewerFormat.Code) {
-                            FontFamily.Monospace
-                        } else {
-                            FontFamily.Default
-                        },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(top = padding.calculateTopPadding())
-                            .verticalScroll(rememberScrollState())
-                            .padding(PvotSpacing.L)
-                    )
-                }
             }
         }
     }
