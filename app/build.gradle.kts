@@ -52,8 +52,8 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.documentfile)
-    implementation(libs.androidx.pdf.compose)
-    implementation(libs.androidx.pdf.document.service)
+    implementation(libs.androidx.pdf.viewer.fragment)
+    implementation(libs.androidx.fragment.compose)
 
     implementation(libs.pvot.design.system)
     implementation(libs.pvot.core.ui)
