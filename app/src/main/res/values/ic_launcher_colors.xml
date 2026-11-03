@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher icon colours from the light Pvot palette; values-night holds the dark ones. -->
+<resources>
+    <color name="ic_launcher_background">#FFFFFFFF</color>
+    <color name="ic_launcher_page">#FFCFC7FF</color>
+    <color name="ic_launcher_accent">#FF5A4BFF</color>
+</resources>
