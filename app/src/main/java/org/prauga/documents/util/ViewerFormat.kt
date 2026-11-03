@@ -25,7 +25,10 @@ enum class ViewerFormat {
     Html,
 
     /** Rasterized page by page through the platform's own renderer. */
-    Pdf
+    Pdf,
+
+    /** Parsed from its zip of XML parts into paragraphs and runs, shown as styled text. */
+    Docx
 }
 
 private val CodeExtensions = setOf(
@@ -45,12 +48,14 @@ fun viewerFormat(name: String, mimeType: String): ViewerFormat? {
         extension == "md" || extension == "markdown" -> ViewerFormat.Markdown
         extension == "html" || extension == "htm" -> ViewerFormat.Html
         extension == "pdf" -> ViewerFormat.Pdf
+        extension == "docx" -> ViewerFormat.Docx
         extension in CodeExtensions -> ViewerFormat.Code
         mimeType == "application/json" -> ViewerFormat.Json
         mimeType == "text/csv" || mimeType == "application/csv" -> ViewerFormat.Csv
         mimeType == "text/markdown" -> ViewerFormat.Markdown
         mimeType == "text/html" -> ViewerFormat.Html
         mimeType == "application/pdf" -> ViewerFormat.Pdf
+        mimeType.contains("wordprocessingml") -> ViewerFormat.Docx
         mimeType.startsWith("text/") -> ViewerFormat.PlainText
         else -> null
     }

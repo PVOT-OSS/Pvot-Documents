@@ -46,7 +46,7 @@ if it has to be app-local for now, keep it small and list it under "Open items".
 1. Library: folders, "Open with" with an autosave-or-not prompt (remembered after), recents with
    filter chips, search, sort, list/grid, multi-select, share, rename, delete to Recently deleted.
    The "+" to create a blank Office file or start a scan.
-2. Core viewers: PDF, text, code, Markdown, CSV, HTML, JSON, DOCX.
+2. Core viewers (done): PDF, text, code, Markdown, CSV, HTML, JSON, DOCX.
 3. Office formats: XLSX/ODS, PPTX/ODP, ODT, maybe EPUB.
 4. Editing and PDF tools: text/Markdown/CSV editing, PDF markup and signatures, merge, split,
    reorder, rotate, images to PDF, compress, password. Convert-to-PDF tool in Tools.

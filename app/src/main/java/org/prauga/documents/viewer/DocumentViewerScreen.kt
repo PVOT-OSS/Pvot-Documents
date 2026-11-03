@@ -37,10 +37,11 @@ import org.prauga.documents.util.ViewerFormat
 import org.prauga.documents.util.parseCsv
 
 /** Reads [uri] as [format] and shows it: plain text, code and JSON as scrollable text, CSV as a
- * table, Markdown and HTML as rendered styled text, PDF page by page. [name] is just the title,
- * read once from the caller rather than re-resolved here. PDF reads [uri] directly as a file
- * descriptor rather than as decoded text, so it gets its own content branch below, skipping the
- * text-loading state the other formats share. */
+ * table, Markdown and HTML as rendered styled text, PDF page by page, DOCX as styled paragraphs.
+ * [name] is just the title, read once from the caller rather than re-resolved here. PDF and DOCX
+ * read [uri] directly — a file descriptor and a zip, respectively — rather than as decoded text,
+ * so each gets its own content branch below, skipping the text-loading state the other formats
+ * share. */
 @Composable
 fun DocumentViewerScreen(
     uri: Uri,
@@ -53,6 +54,12 @@ fun DocumentViewerScreen(
     ) { padding ->
         if (format == ViewerFormat.Pdf) {
             PdfView(
+                uri = uri,
+                topPadding = padding.calculateTopPadding(),
+                modifier = Modifier.fillMaxSize()
+            )
+        } else if (format == ViewerFormat.Docx) {
+            DocxView(
                 uri = uri,
                 topPadding = padding.calculateTopPadding(),
                 modifier = Modifier.fillMaxSize()
