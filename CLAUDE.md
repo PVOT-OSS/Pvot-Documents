@@ -4,7 +4,7 @@ Pvot Documents (`org.prauga.documents`) is a private, offline document reader an
 Jetpack Compose on the Pvot design system. It is a PVOT-OSS app; the design system lives in the
 `PvotLib/` git submodule, built as an included build (`settings.gradle.kts`) and resolved as
 `com.prauga.pvot:design-system` and `core-ui`. The goal is an open source answer to the OnePlus
-Documents app, starting from what [Fossify Documents](https://github.com/FossifyOrg/Documents) does.
+Documents app.
 
 ## Read first
 
@@ -20,10 +20,11 @@ if it has to be app-local for now, keep it small and list it under "Open items".
 
 ## Decisions
 
-- **New app, not a Fossify fork.** Fossify's UI is built on `fossify-commons`. We port its data and
-  parsing code (file scanning, DOCX through Mammoth, Markdown, CSV, HTML sanitizing) and build every
-  screen on PvotLib. Both are GPL-3.0: ported files keep their copyright and license header, and are
-  listed in `THIRD_PARTY_NOTICES.md`.
+- **Everything here is our own code.** Scanning, file parsing (DOCX, Markdown, CSV, HTML, ...) and
+  every screen are written for this app, not ported or adapted from another project. No other
+  project is credited or referenced in code, commits or docs. Third-party libraries we take a real
+  dependency on (not code we copy) are the normal exception and are credited in
+  `THIRD_PARTY_NOTICES.md` as usual.
 - **Storage through the Storage Access Framework.** The user picks folders; the app keeps persisted
   URI permissions. No storage permission and no `MANAGE_EXTERNAL_STORAGE` for now; "All files
   access" may come later as an option.
@@ -33,7 +34,7 @@ if it has to be app-local for now, keep it small and list it under "Open items".
 - **No network.** The app does not ask for `INTERNET`. Any AI feature is on-device and comes last.
 - **Office formats are view-only** in v1, through small parsers of our own rather than a bundled
   office suite.
-- **Nav follows OnePlus Docs' shape, not Fossify's**: four tabs, Recent / Tools / Manage / Settings.
+- **Nav follows OnePlus Docs' shape**: four tabs, Recent / Tools / Manage / Settings.
   Recent is one list with type filter chips (All, Scanned, DOC, XLS, ...), not separate tabs per
   type. Tools is a hub of cards (scan, convert, later AI). Manage holds folders ("Sources"),
   "Created by me", and later Recently deleted / Private Safe. A floating "+" for new/scan is not

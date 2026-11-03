@@ -41,9 +41,7 @@ Requires JDK 21 and the Android SDK (compile SDK 37.1). Min SDK is 27.
 
 ## Credits
 
-Pvot Documents follows [Fossify Documents](https://github.com/FossifyOrg/Documents) (GPL-3.0), whose
-document parsing it will build on. Third-party notices are in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Third-party notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## License
 
