@@ -42,6 +42,16 @@ class DocumentsRepository(private val context: Context) {
     }
 
     /**
+     * [uri]'s content, decoded as UTF-8 text. Throws if the document can't be read or isn't
+     * actually text — the viewer turns that into [com.prauga.pvot.coreui.UiState.Error].
+     */
+    suspend fun readText(uri: Uri): String = withContext(Dispatchers.IO) {
+        val stream = context.contentResolver.openInputStream(uri)
+            ?: error("This document can't be opened right now.")
+        stream.use { it.readBytes().toString(Charsets.UTF_8) }
+    }
+
+    /**
      * [uri] as a single document (not a tree), such as one received through "Open with" or
      * "Share". Null if it no longer resolves — a one-time grant from the sending app that has
      * since expired, for example.

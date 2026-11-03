@@ -58,19 +58,23 @@ import kotlinx.coroutines.launch
 import org.prauga.documents.AppPreferences
 import org.prauga.documents.R
 import org.prauga.documents.data.DocumentsRepository
+import org.prauga.documents.models.DocumentEntry
 import org.prauga.documents.models.FolderEntry
 import org.prauga.documents.models.ManagedDocument
 import org.prauga.documents.models.TrashedDocument
 import org.prauga.documents.util.DocumentSort
 import org.prauga.documents.util.documentKind
 import org.prauga.documents.util.formatFileSize
+import org.prauga.documents.util.readableUri
 import org.prauga.documents.util.shareDocument
 import org.prauga.documents.util.shareDocuments
 import org.prauga.documents.util.sortedByDocument
+import org.prauga.documents.util.viewerFormat
+import org.prauga.documents.viewer.DocumentViewerActivity
 
 /**
- * Folders the user added, and the documents found directly inside them. Opening a document is
- * phase 2; tapping one for now only reports that through [onUnsupported].
+ * Folders the user added, and the documents found directly inside them. Tapping one opens it if
+ * its format has a viewer yet; [onUnsupported] reports when it doesn't.
  */
 @Composable
 fun ManageScreen(
@@ -101,6 +105,15 @@ fun ManageScreen(
     val scanUnsupportedMessage = stringResource(R.string.manage_scan_unsupported)
     val createdMessage = stringResource(R.string.manage_new_created)
     val createFailedMessage = stringResource(R.string.manage_new_create_failed)
+
+    fun openDocument(document: DocumentEntry) {
+        val format = viewerFormat(document.name, document.mimeType)
+        if (format != null) {
+            DocumentViewerActivity.start(context, readableUri(context, document), document.name, format)
+        } else {
+            onUnsupported(openUnsupportedMessage)
+        }
+    }
 
     fun delete(managed: ManagedDocument) {
         scope.launch {
@@ -448,7 +461,7 @@ fun ManageScreen(
                                     if (selectedUris.isNotEmpty()) {
                                         toggleSelection(managed.document.uri)
                                     } else {
-                                        onUnsupported(openUnsupportedMessage)
+                                        openDocument(managed.document)
                                     }
                                 },
                                 onMore = { actionsFor = managed }
@@ -506,7 +519,7 @@ fun ManageScreen(
                                         if (selectedUris.isNotEmpty()) {
                                             toggleSelection(document.uri)
                                         } else {
-                                            onUnsupported(openUnsupportedMessage)
+                                            openDocument(document)
                                         }
                                     },
                                     onLongClick = { toggleSelection(document.uri) }

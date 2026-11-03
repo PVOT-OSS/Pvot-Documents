@@ -45,6 +45,11 @@
             </intent-filter>
         </activity>
 
+        <!-- Opens one document, chosen from Recent or Manage; see DocumentViewerActivity.start(). -->
+        <activity
+            android:name=".viewer.DocumentViewerActivity"
+            android:exported="false" />
+
         <!-- Shares the app's own copies of opened documents (see res/xml/file_paths.xml) without
              exposing the rest of app storage. -->
         <provider

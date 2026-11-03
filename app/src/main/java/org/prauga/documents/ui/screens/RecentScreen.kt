@@ -32,12 +32,15 @@ import org.prauga.documents.R
 import org.prauga.documents.util.DocumentKind
 import org.prauga.documents.util.documentKind
 import org.prauga.documents.util.formatFileSize
+import org.prauga.documents.util.readableUri
 import org.prauga.documents.util.shareDocument
+import org.prauga.documents.util.viewerFormat
+import org.prauga.documents.viewer.DocumentViewerActivity
 
 /**
  * Documents the app was opened or shared with, most recent first, filterable by type — see
- * [org.prauga.documents.ui.screens.IncomingDocumentHandler]. Opening one is phase 2; tapping it
- * for now only reports that through [onUnsupported].
+ * [org.prauga.documents.ui.screens.IncomingDocumentHandler]. Tapping one opens it if its format
+ * has a viewer yet; [onUnsupported] reports when it doesn't.
  */
 @Composable
 fun RecentScreen(
@@ -133,7 +136,19 @@ fun RecentScreen(
                                         size = 36.dp
                                     )
                                 },
-                                onClick = { onUnsupported(openUnsupportedMessage) }
+                                onClick = {
+                                    val format = viewerFormat(document.name, document.mimeType)
+                                    if (format != null) {
+                                        DocumentViewerActivity.start(
+                                            context,
+                                            readableUri(context, document),
+                                            document.name,
+                                            format
+                                        )
+                                    } else {
+                                        onUnsupported(openUnsupportedMessage)
+                                    }
+                                }
                             )
                         }
                     }
