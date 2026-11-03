@@ -12,6 +12,14 @@
     <string name="cd_settings">Settings</string>
 
     <string name="recent_empty">Documents you open will show up here.</string>
+    <string name="recent_filter_all">All</string>
+    <string name="recent_no_filter_results">No %1$s documents in Recent.</string>
+    <string name="document_kind_pdf">PDF</string>
+    <string name="document_kind_word">Word</string>
+    <string name="document_kind_spreadsheet">Spreadsheet</string>
+    <string name="document_kind_html">HTML</string>
+    <string name="document_kind_text">Text</string>
+    <string name="document_kind_other">Other</string>
     <string name="tools_empty">Scan a document or convert a file to get started.</string>
     <string name="manage_empty">Add a folder to see the documents in it.</string>
     <string name="manage_add_folder">Add folder</string>
@@ -34,7 +42,28 @@
     <string name="manage_document_actions">More actions for %1$s</string>
     <string name="manage_share_document_action">Share</string>
     <string name="manage_rename_document_action">Rename</string>
+    <string name="manage_select_document_action">Select</string>
     <string name="manage_delete_document_action">Delete</string>
+    <string name="manage_select_all">Select all</string>
+    <string name="manage_share_selected">Share selected</string>
+    <string name="manage_delete_selected">Delete selected</string>
+    <string name="manage_cancel_selection">Cancel selection</string>
+    <plurals name="manage_selected_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+
+    <string name="manage_new_document">New document</string>
+    <string name="manage_new_text">Text file</string>
+    <string name="manage_new_markdown">Markdown file</string>
+    <string name="manage_new_csv">CSV file</string>
+    <string name="manage_new_scan">Scan a document</string>
+    <string name="manage_scan_unsupported">Scanning comes in a later update</string>
+    <string name="manage_new_filename_placeholder">File name</string>
+    <string name="manage_new_cancel">Cancel</string>
+    <string name="manage_new_create">Create</string>
+    <string name="manage_new_created">Created</string>
+    <string name="manage_new_create_failed">Couldn\'t create this file</string>
     <string name="manage_rename_title">Rename document</string>
     <string name="manage_rename_cancel">Cancel</string>
     <string name="manage_rename_save">Save</string>

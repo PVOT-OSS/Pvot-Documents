@@ -132,6 +132,40 @@ class DocumentsRepository(private val context: Context) {
             }.getOrDefault(false)
         }
 
+    /**
+     * Creates a new, empty document named [name] (with [extension] appended if [name] doesn't
+     * already end with it) directly inside [folderTreeUri]. Only plain-text formats — what Phase 1
+     * can honestly create without a real DOCX/XLSX writer, which is Phase 3/4 work.
+     */
+    suspend fun createTextDocument(
+        folderTreeUri: Uri,
+        name: String,
+        extension: String,
+        mimeType: String
+    ): DocumentEntry? = withContext(Dispatchers.IO) {
+        val tree = DocumentFile.fromTreeUri(context, folderTreeUri) ?: return@withContext null
+        val fileName = if (name.endsWith(".$extension", ignoreCase = true)) {
+            name
+        } else {
+            "$name.$extension"
+        }
+        val created = tree.createFile(mimeType, fileName) ?: return@withContext null
+        val written = runCatching {
+            context.contentResolver.openOutputStream(created.uri)?.use { it.flush() } != null
+        }.getOrDefault(false)
+        if (!written) {
+            created.delete()
+            return@withContext null
+        }
+        DocumentEntry(
+            uri = created.uri,
+            name = created.name ?: fileName,
+            mimeType = mimeType,
+            sizeBytes = created.length(),
+            lastModified = created.lastModified()
+        )
+    }
+
     /** Copies [uri] into its own timestamped subfolder under `filesDir/$baseDirName/`, so the file
      * on disk keeps [displayName] exactly rather than a deduplicating prefix — the name shared
      * back out through `FileProvider` reads from the file, not from [DocumentEntry.name]. */

@@ -3,6 +3,7 @@ package org.prauga.documents.util
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import org.prauga.documents.R
 
 /**
  * The file type a document's icon is tinted by, same idea as the colored file badges in Google
@@ -23,6 +24,17 @@ enum class DocumentKind(private val fixedColor: Color?) {
 
     @Composable
     fun color(): Color = fixedColor ?: MaterialTheme.colorScheme.primary
+
+    /** The label a filter chip shows for this kind, such as on the Recent tab. */
+    val labelRes: Int
+        get() = when (this) {
+            Pdf -> R.string.document_kind_pdf
+            Word -> R.string.document_kind_word
+            Spreadsheet -> R.string.document_kind_spreadsheet
+            Html -> R.string.document_kind_html
+            PlainText -> R.string.document_kind_text
+            Other -> R.string.document_kind_other
+        }
 }
 
 /** [DocumentKind] for a document, read from its file extension — more reliable than [mimeType],

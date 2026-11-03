@@ -3,9 +3,16 @@ package org.prauga.documents.ui.screens
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -22,21 +29,30 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.prauga.pvot.coreui.PvotEmptyContent
+import com.prauga.pvot.designsystem.components.PvotBottomSheet
+import com.prauga.pvot.designsystem.components.PvotCard
+import com.prauga.pvot.designsystem.components.PvotCardDefaults
 import com.prauga.pvot.designsystem.components.PvotDialog
 import com.prauga.pvot.designsystem.components.PvotDialogAction
 import com.prauga.pvot.designsystem.components.PvotDialogActionStyle
 import com.prauga.pvot.designsystem.components.PvotScreen
 import com.prauga.pvot.designsystem.components.PvotScreenDefaults
 import com.prauga.pvot.designsystem.components.PvotSegmentedControl
+import com.prauga.pvot.designsystem.components.PvotSheetItem
+import com.prauga.pvot.designsystem.components.button.PvotFab
 import com.prauga.pvot.designsystem.components.button.PvotIconButton
 import com.prauga.pvot.designsystem.components.list.PvotListGroup
 import com.prauga.pvot.designsystem.components.list.PvotListRow
 import com.prauga.pvot.designsystem.components.textfield.PvotTextField
 import com.prauga.pvot.designsystem.motion.pvotReveal
+import com.prauga.pvot.designsystem.navigation.LocalPvotNavBarSizes
 import com.prauga.pvot.designsystem.theme.PvotSpacing
 import kotlinx.coroutines.launch
 import org.prauga.documents.AppPreferences
@@ -49,6 +65,7 @@ import org.prauga.documents.util.DocumentSort
 import org.prauga.documents.util.documentKind
 import org.prauga.documents.util.formatFileSize
 import org.prauga.documents.util.shareDocument
+import org.prauga.documents.util.shareDocuments
 import org.prauga.documents.util.sortedByDocument
 
 /**
@@ -74,10 +91,16 @@ fun ManageScreen(
     var renaming by remember { mutableStateOf<ManagedDocument?>(null) }
     var searchQuery by remember { mutableStateOf("") }
     var sortOption by remember { mutableStateOf(DocumentSort.Name) }
+    var selectedUris by remember { mutableStateOf<Set<Uri>>(emptySet()) }
+    var showNewSheet by remember { mutableStateOf(false) }
+    var creatingType by remember { mutableStateOf<NewFileType?>(null) }
     val openUnsupportedMessage = stringResource(R.string.manage_open_unsupported)
     val movedToTrashMessage = stringResource(R.string.manage_moved_to_trash)
     val deleteFailedMessage = stringResource(R.string.manage_delete_failed)
     val renameFailedMessage = stringResource(R.string.manage_rename_failed)
+    val scanUnsupportedMessage = stringResource(R.string.manage_scan_unsupported)
+    val createdMessage = stringResource(R.string.manage_new_created)
+    val createFailedMessage = stringResource(R.string.manage_new_create_failed)
 
     fun delete(managed: ManagedDocument) {
         scope.launch {
@@ -94,6 +117,52 @@ fun ManageScreen(
                 onUnsupported(movedToTrashMessage)
             } else {
                 onUnsupported(deleteFailedMessage)
+            }
+        }
+    }
+
+    fun toggleSelection(uri: Uri) {
+        selectedUris = if (uri in selectedUris) selectedUris - uri else selectedUris + uri
+    }
+
+    fun deleteSelected(selected: List<ManagedDocument>) {
+        scope.launch {
+            var failures = 0
+            selected.forEach { managed ->
+                val trashed = repository.moveToTrash(managed.document)
+                if (trashed != null) {
+                    preferences.addTrashedDocument(
+                        TrashedDocument(
+                            document = trashed,
+                            folderTreeUri = managed.folderTreeUri,
+                            deletedAt = System.currentTimeMillis()
+                        )
+                    )
+                } else {
+                    failures++
+                }
+            }
+            selectedUris = emptySet()
+            refreshToken++
+            onUnsupported(if (failures == 0) movedToTrashMessage else deleteFailedMessage)
+        }
+    }
+
+    fun createDocument(type: NewFileType, name: String) {
+        val folderUri = folders.first().treeUri
+        scope.launch {
+            val created = repository.createTextDocument(
+                folderUri,
+                name.ifBlank { "Untitled" },
+                type.extension,
+                type.mimeType
+            )
+            creatingType = null
+            if (created != null) {
+                refreshToken++
+                onUnsupported(createdMessage)
+            } else {
+                onUnsupported(createFailedMessage)
             }
         }
     }
@@ -130,6 +199,7 @@ fun ManageScreen(
             onDismiss = { actionsFor = null },
             onShare = { shareDocument(context, managed.document) },
             onRename = { renaming = managed },
+            onSelect = { selectedUris = setOf(managed.document.uri) },
             onDelete = { delete(managed) }
         )
     }
@@ -168,6 +238,42 @@ fun ManageScreen(
         }
     }
 
+    if (showNewSheet) {
+        NewDocumentSheet(
+            onDismiss = { showNewSheet = false },
+            onPickType = { type -> creatingType = type },
+            onScan = { onUnsupported(scanUnsupportedMessage) }
+        )
+    }
+
+    creatingType?.let { type ->
+        var name by remember(type) { mutableStateOf("") }
+        PvotDialog(
+            visible = true,
+            onDismissRequest = { creatingType = null },
+            title = stringResource(type.titleRes),
+            content = {
+                PvotTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    placeholder = stringResource(R.string.manage_new_filename_placeholder),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        ) {
+            PvotDialogAction(
+                label = stringResource(R.string.manage_new_cancel),
+                onClick = { creatingType = null }
+            )
+            PvotDialogAction(
+                label = stringResource(R.string.manage_new_create),
+                style = PvotDialogActionStyle.Primary,
+                onClick = { createDocument(type, name.trim()) }
+            )
+        }
+    }
+
     val visibleDocuments = documents
         .filter { it.document.name.contains(searchQuery, ignoreCase = true) }
         .sortedByDocument(sortOption) { it.document }
@@ -194,11 +300,35 @@ fun ManageScreen(
         return
     }
 
+    Box(modifier = modifier) {
     PvotScreen(
-        modifier = modifier,
+        modifier = Modifier.fillMaxSize(),
         state = state,
         contentPadding = PvotScreenDefaults.contentPadding(top = topPadding)
     ) {
+        if (selectedUris.isNotEmpty()) {
+            item {
+                SelectionToolbar(
+                    count = selectedUris.size,
+                    onSelectAll = {
+                        selectedUris = visibleDocuments.map { it.document.uri }.toSet()
+                    },
+                    onShare = {
+                        shareDocuments(
+                            context,
+                            visibleDocuments
+                                .filter { it.document.uri in selectedUris }
+                                .map { it.document }
+                        )
+                    },
+                    onDelete = {
+                        deleteSelected(visibleDocuments.filter { it.document.uri in selectedUris })
+                    },
+                    onCancel = { selectedUris = emptySet() },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
         item {
             PvotListGroup(
                 modifier = Modifier.fillMaxWidth().pvotReveal(0),
@@ -301,37 +431,87 @@ fun ManageScreen(
             }
         }
         if (visibleDocuments.isNotEmpty()) {
-            item {
-                PvotListGroup(
-                    modifier = Modifier.fillMaxWidth().pvotReveal(3),
-                    title = stringResource(R.string.manage_section_documents)
-                ) {
-                    visibleDocuments.forEach { managed ->
-                        item {
-                            val document = managed.document
-                            PvotListRow(
-                                title = document.name,
-                                supportingText = formatFileSize(document.sizeBytes),
-                                leading = {
-                                    Icon(
-                                        painterResource(R.drawable.ic_file_text),
-                                        contentDescription = null,
-                                        tint = documentKind(document.name, document.mimeType).color()
-                                    )
+            if (preferences.gridView) {
+                item {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth().pvotReveal(3),
+                        horizontalArrangement = Arrangement.spacedBy(PvotSpacing.M),
+                        verticalArrangement = Arrangement.spacedBy(PvotSpacing.M)
+                    ) {
+                        visibleDocuments.forEach { managed ->
+                            val selected = managed.document.uri in selectedUris
+                            DocumentGridCard(
+                                managed = managed,
+                                selected = selected,
+                                inSelectionMode = selectedUris.isNotEmpty(),
+                                onClick = {
+                                    if (selectedUris.isNotEmpty()) {
+                                        toggleSelection(managed.document.uri)
+                                    } else {
+                                        onUnsupported(openUnsupportedMessage)
+                                    }
                                 },
-                                trailing = {
-                                    PvotIconButton(
-                                        icon = painterResource(R.drawable.ic_more),
-                                        contentDescription = stringResource(
-                                            R.string.manage_document_actions,
-                                            document.name
-                                        ),
-                                        onClick = { actionsFor = managed },
-                                        size = 36.dp
-                                    )
-                                },
-                                onClick = { onUnsupported(openUnsupportedMessage) }
+                                onMore = { actionsFor = managed }
                             )
+                        }
+                    }
+                }
+            } else {
+                item {
+                    PvotListGroup(
+                        modifier = Modifier.fillMaxWidth().pvotReveal(3),
+                        title = stringResource(R.string.manage_section_documents)
+                    ) {
+                        visibleDocuments.forEach { managed ->
+                            item {
+                                val document = managed.document
+                                val selected = document.uri in selectedUris
+                                PvotListRow(
+                                    title = document.name,
+                                    supportingText = formatFileSize(document.sizeBytes),
+                                    selected = selected,
+                                    leading = {
+                                        Icon(
+                                            painterResource(
+                                                if (selected) {
+                                                    R.drawable.ic_check_circle_filled
+                                                } else {
+                                                    R.drawable.ic_file_text
+                                                }
+                                            ),
+                                            contentDescription = null,
+                                            tint = if (selected) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                documentKind(document.name, document.mimeType).color()
+                                            }
+                                        )
+                                    },
+                                    trailing = if (selectedUris.isEmpty()) {
+                                        {
+                                            PvotIconButton(
+                                                icon = painterResource(R.drawable.ic_more),
+                                                contentDescription = stringResource(
+                                                    R.string.manage_document_actions,
+                                                    document.name
+                                                ),
+                                                onClick = { actionsFor = managed },
+                                                size = 36.dp
+                                            )
+                                        }
+                                    } else {
+                                        null
+                                    },
+                                    onClick = {
+                                        if (selectedUris.isNotEmpty()) {
+                                            toggleSelection(document.uri)
+                                        } else {
+                                            onUnsupported(openUnsupportedMessage)
+                                        }
+                                    },
+                                    onLongClick = { toggleSelection(document.uri) }
+                                )
+                            }
                         }
                     }
                 }
@@ -349,6 +529,193 @@ fun ManageScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth().pvotReveal(3)
+                )
+            }
+        }
+    }
+        PvotFab(
+            icon = painterResource(R.drawable.ic_plus),
+            onClick = { showNewSheet = true },
+            contentDescription = stringResource(R.string.manage_new_document),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(
+                    end = PvotSpacing.L,
+                    bottom = PvotSpacing.L + LocalPvotNavBarSizes.current.barHeight
+                )
+        )
+    }
+}
+
+/**
+ * A plain-text format the "+" can create directly — a real DOCX/XLSX/PPTX writer is Phase 3/4
+ * work, so the choices here are honest about what Phase 1 can actually produce empty.
+ */
+private data class NewFileType(val extension: String, val mimeType: String, val titleRes: Int)
+
+private val NewFileTypes = listOf(
+    NewFileType("txt", "text/plain", R.string.manage_new_text),
+    NewFileType("md", "text/markdown", R.string.manage_new_markdown),
+    NewFileType("csv", "text/csv", R.string.manage_new_csv)
+)
+
+/** The "+" menu: a plain-text format to create now, or scanning, which isn't built until Phase 5. */
+@Composable
+private fun NewDocumentSheet(
+    onDismiss: () -> Unit,
+    onPickType: (NewFileType) -> Unit,
+    onScan: () -> Unit
+) {
+    PvotBottomSheet(
+        visible = true,
+        onDismissRequest = onDismiss,
+        title = stringResource(R.string.manage_new_document)
+    ) {
+        NewFileTypes.forEach { type ->
+            PvotSheetItem(
+                title = stringResource(type.titleRes),
+                icon = {
+                    Icon(
+                        painterResource(R.drawable.ic_file_text),
+                        contentDescription = null
+                    )
+                },
+                onClick = { onDismiss(); onPickType(type) }
+            )
+        }
+        PvotSheetItem(
+            title = stringResource(R.string.manage_new_scan),
+            icon = { Icon(painterResource(R.drawable.ic_camera), contentDescription = null) },
+            onClick = { onDismiss(); onScan() }
+        )
+    }
+}
+
+/** A document in Manage's grid view: icon, name and size, with the same overflow menu as the
+ * list row, just smaller — grid mode trades the size reading room for an at-a-glance layout, it
+ * doesn't drop an action. In selection mode the corner button becomes a selected/unselected mark
+ * instead, matching the list row's own swap to [com.prauga.pvot.designsystem.components.list.PvotListRow]'s
+ * tinted [selected] state. */
+@Composable
+private fun DocumentGridCard(
+    managed: ManagedDocument,
+    selected: Boolean,
+    inSelectionMode: Boolean,
+    onClick: () -> Unit,
+    onMore: () -> Unit
+) {
+    val document = managed.document
+    PvotCard(
+        onClick = onClick,
+        modifier = Modifier.width(108.dp),
+        colors = if (selected) {
+            PvotCardDefaults.colors(
+                containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+            )
+        } else {
+            PvotCardDefaults.colors()
+        }
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(PvotSpacing.S),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                if (inSelectionMode) {
+                    Icon(
+                        painterResource(
+                            if (selected) R.drawable.ic_check_circle_filled else R.drawable.ic_checkbox
+                        ),
+                        contentDescription = null,
+                        tint = if (selected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.size(22.dp)
+                    )
+                } else {
+                    PvotIconButton(
+                        icon = painterResource(R.drawable.ic_more),
+                        contentDescription = stringResource(
+                            R.string.manage_document_actions,
+                            document.name
+                        ),
+                        onClick = onMore,
+                        size = 28.dp
+                    )
+                }
+            }
+            Icon(
+                painterResource(R.drawable.ic_file_text),
+                contentDescription = null,
+                tint = documentKind(document.name, document.mimeType).color(),
+                modifier = Modifier.size(36.dp)
+            )
+            Text(
+                text = document.name,
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = PvotSpacing.XS)
+            )
+            Text(
+                text = formatFileSize(document.sizeBytes),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+/** The bar that replaces the normal screen top while documents are selected: a count and the
+ * actions that work on all of them at once. */
+@Composable
+private fun SelectionToolbar(
+    count: Int,
+    onSelectAll: () -> Unit,
+    onShare: () -> Unit,
+    onDelete: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    PvotListGroup(modifier = modifier) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(PvotSpacing.L),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(PvotSpacing.XS)
+            ) {
+                Text(
+                    text = pluralStringResource(R.plurals.manage_selected_count, count, count),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+                PvotIconButton(
+                    icon = painterResource(R.drawable.ic_checkbox),
+                    contentDescription = stringResource(R.string.manage_select_all),
+                    onClick = onSelectAll,
+                    size = 36.dp
+                )
+                PvotIconButton(
+                    icon = painterResource(R.drawable.ic_share),
+                    contentDescription = stringResource(R.string.manage_share_selected),
+                    onClick = onShare,
+                    size = 36.dp
+                )
+                PvotIconButton(
+                    icon = painterResource(R.drawable.ic_trash),
+                    contentDescription = stringResource(R.string.manage_delete_selected),
+                    onClick = onDelete,
+                    size = 36.dp
+                )
+                PvotIconButton(
+                    icon = painterResource(R.drawable.ic_x),
+                    contentDescription = stringResource(R.string.manage_cancel_selection),
+                    onClick = onCancel,
+                    size = 36.dp
                 )
             }
         }
