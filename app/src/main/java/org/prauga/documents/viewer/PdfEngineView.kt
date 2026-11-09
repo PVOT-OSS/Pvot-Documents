@@ -665,6 +665,20 @@ private fun DrawScope.drawPdfPage(
                         op.italic -> typefaceItalic
                         else -> typefaceRegular
                     }
+                    // The PDF's own per-glyph advance (how far the *next* glyph starts) is based
+                    // on the document's real, usually-unembedded font — it rarely matches the
+                    // natural width of the same character in whatever system typeface we
+                    // substitute. LaTeX's Computer Modern is a common, noticeably narrower
+                    // example. Positioning each glyph correctly per PDF metrics but rendering it
+                    // at the substitute font's own natural width left a visible gap after every
+                    // letter; stretch/compress horizontally so the glyph actually fills the
+                    // advance the PDF specified.
+                    textPaint.textScaleX = 1f
+                    val naturalWidth = textPaint.measureText(op.text)
+                    val expectedWidth = op.advance * scale
+                    if (naturalWidth > 0.5f && expectedWidth > 0f) {
+                        textPaint.textScaleX = (expectedWidth / naturalWidth).coerceIn(0.5f, 2f)
+                    }
                     nc.drawText(op.text, toPxX(op.x), toPxY(op.y), textPaint)
                 }
                 is PdfDrawOp.DrawImage -> {
