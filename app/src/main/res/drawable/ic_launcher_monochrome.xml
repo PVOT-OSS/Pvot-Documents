@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Themed-icon layer: the page as an outline with its lines. A filled page would merge with the lines
+  into one silhouette once the system tints it.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M59,28v9a5,5 0 0 0 5,5h9M41,28h18l14,14v32a6,6 0 0 1 -6,6h-26a6,6 0 0 1 -6,-6v-40a6,6 0 0 1 6,-6z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M45,53h18M45,62h18M45,71h10"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round" />
+</vector>

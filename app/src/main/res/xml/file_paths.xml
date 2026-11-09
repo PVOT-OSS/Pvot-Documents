@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Exposes the documents DocumentsRepository.copyToAppStorage() writes to filesDir/opened/, so
+     they can be shared out through FileProvider without exporting the rest of app storage. -->
+<paths>
+    <files-path name="opened" path="opened/" />
+</paths>
