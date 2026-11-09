@@ -130,25 +130,20 @@ class AppPreferences(context: Context) {
 
     /**
      * Adds [entry], replacing any existing entry for the same document. Re-opening an unsaved
-     * document resolves to the same content URI, so a URI match is enough there; a fresh autosave
-     * is a new file with a new URI each time, so a name-and-size match catches that case too — and
-     * the old copy, now unreferenced, is deleted rather than left behind.
+     * document resolves to the same content URI, and re-opening an autosaved one reuses the same
+     * copy (see [org.prauga.documents.data.DocumentsRepository.copyToAppStorage]), so a URI match
+     * covers both. A name-and-size match also counts, for the same document reached through a
+     * different content URI or across an autosave setting change — but not between two of
+     * Documents' own copies: those only differ when their content does, so both stay listed.
+     * Nothing on disk is deleted here.
      */
     fun addRecentDocument(entry: DocumentEntry) {
         val superseded = recentDocuments.filter {
-            it.uri == entry.uri || (it.name == entry.name && it.sizeBytes == entry.sizeBytes)
-        }
-        superseded.forEach { old ->
-            if (old.uri.scheme == "file" && old.uri != entry.uri) {
-                // Delete the file, then its folder only if that leaves it empty: each copy from
-                // copyToAppStorage() gets its own folder, but an old build's file may not have, and
-                // a recursive delete of a shared folder would take other copies down with it.
-                old.uri.path?.let { path ->
-                    val file = File(path)
-                    file.delete()
-                    file.parentFile?.delete()
-                }
-            }
+            it.uri == entry.uri || (
+                it.name == entry.name &&
+                    it.sizeBytes == entry.sizeBytes &&
+                    !(it.uri.scheme == "file" && entry.uri.scheme == "file")
+                )
         }
         val updated = (listOf(entry) + (recentDocuments - superseded.toSet())).take(MaxRecentDocuments)
         prefs.edit { putString(KEY_RECENT, encodeRecentDocuments(updated)) }

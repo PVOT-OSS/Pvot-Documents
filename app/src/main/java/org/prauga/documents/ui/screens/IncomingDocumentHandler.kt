@@ -51,7 +51,16 @@ fun IncomingDocumentHandler(uri: Uri, preferences: AppPreferences, onHandled: ()
     }
 
     LaunchedEffect(uri, autosave) {
-        val entry = (if (autosave) repository.copyToAppStorage(uri, resolvedName) else null)
+        val saved = if (autosave) {
+            repository.copyToAppStorage(
+                uri,
+                resolvedName,
+                preferredUris = preferences.recentDocuments.map { it.uri }
+            )
+        } else {
+            null
+        }
+        val entry = saved
             ?: repository.documentInfo(uri)?.takeIf { repository.canRead(uri) }
         if (entry != null) {
             openDocument(context, preferences, entry)

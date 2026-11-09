@@ -9,6 +9,8 @@ import kotlinx.coroutines.withContext
 import org.prauga.documents.models.DocumentEntry
 import org.prauga.documents.models.FolderEntry
 import java.io.File
+import java.io.InputStream
+import java.security.MessageDigest
 
 /**
  * Reads folders and documents through the Storage Access Framework. Every call is a live query
@@ -79,9 +81,77 @@ class DocumentsRepository(private val context: Context) {
      * Copies [uri] into the app's own storage, under `filesDir/opened/`, so it survives after a
      * transient grant from the sending app expires. Returns a [DocumentEntry] pointing at the
      * copy, named [displayName].
+     *
+     * If an earlier copy of the same document is already there, that copy is returned instead
+     * of writing another one, so repeated "Open with" of one file keeps one copy and one URI.
+     * "Same document" means same file name, same size and same SHA-256 of the content: name and
+     * size are a free first filter, and the hash is only computed when they already match, so a
+     * different file that happens to share both still gets its own copy. When several old copies
+     * match (duplicates written by earlier builds), one in [preferredUris] (what Recent already
+     * points at) wins, then the newest; the others are left as they are.
      */
-    suspend fun copyToAppStorage(uri: Uri, displayName: String): DocumentEntry? =
-        copyIntoOwnStorage(uri, displayName, OpenedDirName)
+    suspend fun copyToAppStorage(
+        uri: Uri,
+        displayName: String,
+        preferredUris: Collection<Uri> = emptyList()
+    ): DocumentEntry? =
+        existingOpenedCopy(uri, displayName, preferredUris)
+            ?: copyIntoOwnStorage(uri, displayName, OpenedDirName)
+
+    /** An existing copy under `filesDir/opened/` with [uri]'s name, size and content, if any.
+     * Reads [uri] once, and only when a copy with the same name and size exists. */
+    private suspend fun existingOpenedCopy(
+        uri: Uri,
+        displayName: String,
+        preferredUris: Collection<Uri>
+    ): DocumentEntry? = withContext(Dispatchers.IO) {
+        val safeName = safeFileName(displayName)
+        val size = runCatching { DocumentFile.fromSingleUri(context, uri)?.length() }
+            .getOrNull() ?: 0L
+        // Providers that don't report a size give 0; then every same-named copy is a candidate
+        // and the hash decides.
+        val candidates = File(context.filesDir, OpenedDirName)
+            .listFiles { dir -> dir.isDirectory }
+            .orEmpty()
+            .map { File(it, safeName) }
+            .filter { it.isFile && (size <= 0L || it.length() == size) }
+        if (candidates.isEmpty()) return@withContext null
+
+        val incomingHash = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { sha256(it) }
+        }.getOrNull() ?: return@withContext null
+        val preferredPaths = preferredUris.filter { it.scheme == "file" }.mapNotNull { it.path }.toSet()
+        val match = candidates
+            .sortedWith(
+                compareByDescending<File> { it.path in preferredPaths }
+                    .thenByDescending { it.parentFile?.name?.toLongOrNull() ?: 0L }
+            )
+            .firstOrNull { candidate ->
+                runCatching { candidate.inputStream().use { sha256(it) } }.getOrNull()
+                    ?.contentEquals(incomingHash) == true
+            } ?: return@withContext null
+
+        // A reuse stands in for a fresh copy, which would have been dated now.
+        match.setLastModified(System.currentTimeMillis())
+        DocumentEntry(
+            uri = Uri.fromFile(match),
+            name = displayName,
+            mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream",
+            sizeBytes = match.length(),
+            lastModified = match.lastModified()
+        )
+    }
+
+    private fun sha256(input: InputStream): ByteArray {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            digest.update(buffer, 0, read)
+        }
+        return digest.digest()
+    }
 
     /**
      * Moves [document] out of its folder and into `filesDir/trash/`: copies it there, then
@@ -190,7 +260,7 @@ class DocumentsRepository(private val context: Context) {
         displayName: String,
         baseDirName: String
     ): DocumentEntry? = withContext(Dispatchers.IO) {
-        val safeName = displayName.ifBlank { "document" }
+        val safeName = safeFileName(displayName)
         val copyDir = File(
             File(context.filesDir, baseDirName),
             System.currentTimeMillis().toString()
@@ -210,6 +280,8 @@ class DocumentsRepository(private val context: Context) {
             lastModified = target.lastModified()
         )
     }
+
+    private fun safeFileName(displayName: String) = displayName.ifBlank { "document" }
 
     /** Deletes a `file://` URI from [copyIntoOwnStorage], and its now-empty subfolder. */
     private fun deleteOwnCopy(uri: Uri) {
