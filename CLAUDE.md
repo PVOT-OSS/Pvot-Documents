@@ -34,13 +34,13 @@ if it has to be app-local for now, keep it small and list it under "Open items".
 - **PDF engine history.** `androidx.pdf` went through a sandboxed system service for every page,
   and the per-page binder round-trip stuttered visibly on real-finger scroll (confirmed with
   on-device Perfetto traces: clean frame timing throughout, so the stutter was the IPC, not
-  rendering) — replaced with PdfBox-Android (Apache-2.0, in-process rendering). PdfBox-Android
-  fixed the stutter but had no text selection and its own rendering-fidelity and memory problems,
-  so it's being replaced in turn by `:pdf-engine`, a from-scratch Rust PDF engine (parsing on top
-  of `lopdf`, our own content-stream interpreter, font/encoding/CMap handling, and search), JNI-
-  bridged into the app and drawn as vector primitives straight onto a Compose `Canvas` — no
-  sandboxed service, no whole-document up-front rasterization. PdfBox-Android stays in the
-  dependency tree until the new engine is verified on-device and can fully replace it.
+  rendering) — replaced with PdfBox-Android (in-process), which had no text selection and weak
+  fidelity. A from-scratch Rust engine came next and was dropped: real-world PDFs (embedded and
+  symbol fonts, Type3, transparency, scans) kept exposing gaps that only a mature engine closes.
+  Now **Pdfium runs in-process** through `io.legere:pdfiumandroid` — the same engine as
+  androidx.pdf and Chrome, without the service. Pages render to bitmaps lazily at list width; when
+  zoomed, the visible part of each page re-renders at zoom once the gesture settles. Search and
+  selection use Pdfium's own text API. The viewer UI (`viewer/PdfView.kt`) is ours.
 - **No network.** The app does not ask for `INTERNET`. Any AI feature is on-device and comes last.
 - **Office formats are view-only** in v1, through small parsers of our own rather than a bundled
   office suite.
@@ -88,8 +88,8 @@ app/src/main/java/org/prauga/documents/
   AppPreferences.kt       SharedPreferences-backed settings, observable from Compose
   ui/AppShell.kt          PvotScreenScaffold: top bar per tab, PvotNavBar, four tabs
   ui/screens/             Recent, Tools, Manage (empty states for now), Settings
-  viewer/PdfEngineView.kt PDF viewer on top of :pdf-engine (replacing viewer/PdfView.kt)
-pdf-engine/               Rust PDF engine + its JNI/Kotlin bridge (own Gradle module, see below)
+  viewer/PdfView.kt       PDF viewer UI: scroll, pinch-zoom, search, selection
+  viewer/PdfiumDocument.kt  Pdfium access: rendering, text, search, on one serial dispatcher
 ```
 
 ## Toolchain
@@ -97,12 +97,6 @@ pdf-engine/               Rust PDF engine + its JNI/Kotlin bridge (own Gradle mo
 AGP 9.5.0, Kotlin 2.4.21, Java 21, Gradle 9.6.1, compile SDK 37.1, target SDK 36, min SDK 27
 (PvotLib's floor). CI is `PVOT-OSS/workflows` `android-build.yml` with `java-version: '21'` and runs
 `assembleDebug assembleRelease lint`.
-
-`:pdf-engine` additionally needs a Rust toolchain (`rustup`, stable) with the Android targets
-(`aarch64-linux-android`, `armv7-linux-androideabi`, `x86_64-linux-android`) and `cargo-ndk`
-installed, plus `ANDROID_NDK_HOME` set (or discoverable under `$ANDROID_HOME/ndk`). Gradle's
-`preBuild` for that module shells out to `cargo ndk` itself — see
-`pdf-engine/build.gradle.kts`.
 
 ## Commands
 

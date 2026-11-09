@@ -52,8 +52,7 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.documentfile)
-    implementation(libs.pdfbox.android)
-    implementation(project(":pdf-engine"))
+    implementation(libs.pdfium.android)
 
     implementation(libs.pvot.design.system)
     implementation(libs.pvot.core.ui)

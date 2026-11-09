@@ -22,6 +22,7 @@
     <string name="viewer_pdf_search_count">%1$d of %2$d</string>
     <string name="viewer_pdf_search_none">No matches</string>
     <string name="viewer_pdf_copy_selection">Copy</string>
+    <string name="viewer_pdf_clip_label">Text from PDF</string>
     <string name="recent_no_filter_results">No %1$s documents in Recent.</string>
     <string name="document_kind_pdf">PDF</string>
     <string name="document_kind_word">Word</string>

@@ -1,11 +1,17 @@
 # Third-party notices
 
-## PdfBox-Android
+## PDFium
 
-The PDF viewer (`app/src/main/java/org/prauga/documents/viewer/PdfView.kt`) renders through
-[PdfBox-Android](https://github.com/TomRoush/PdfBox-Android), a port of Apache PDFBox, Apache
-License 2.0. It renders entirely in-process, which is why it's used instead of the platform's
-sandboxed PDF renderer. The license text is in `LICENSES/Apache-2.0.txt`.
+The PDF viewer renders, extracts text and searches through
+[PDFium](https://pdfium.googlesource.com/pdfium/), Copyright 2014 The PDFium Authors, BSD
+3-Clause License; parts of PDFium are also under the Apache License 2.0. The license texts are in
+`LICENSES/BSD-3-Clause-PDFium.txt` and `LICENSES/Apache-2.0.txt`.
+
+## PdfiumAndroidKt
+
+PDFium is reached through [PdfiumAndroidKt](https://github.com/johngray1965/PdfiumAndroidKt)
+(`io.legere:pdfiumandroid`), Copyright 2015 Bekket McClane, 2016 Bartosz Schiller, 2023 John
+Gray, Apache License 2.0. The license text is in `LICENSES/Apache-2.0.txt`.
 
 ## Tabler Icons
 
@@ -15,16 +21,3 @@ The icons in `app/src/main/res/drawable/` (`ic_chevron_down.xml`, `ic_chevron_up
 `ic_share.xml`, `ic_tools.xml`, `ic_trash.xml`, `ic_x.xml`) are converted from
 [Tabler Icons](https://tabler.io/icons), Copyright (c) 2020-2026 Paweł Kuna, MIT License. The
 license text is in `LICENSES/MIT.txt`.
-
-## lopdf
-
-The Rust PDF engine (`pdf-engine/src/main/rust/`) uses [lopdf](https://github.com/J-F-Liu/lopdf)
-for low-level PDF object/xref parsing and stream decompression, MIT License. Everything above
-that layer — the content-stream interpreter, font/encoding handling, text extraction and search —
-is our own code; see `CLAUDE.md` for why PdfBox-Android was replaced.
-
-## zune-jpeg
-
-The Rust PDF engine also uses [zune-jpeg](https://github.com/etemesi254/zune-image) to decode
-`DCTDecode` (JPEG) image XObjects — scanned-page PDFs are almost always one full-page JPEG per
-page — MIT License.
