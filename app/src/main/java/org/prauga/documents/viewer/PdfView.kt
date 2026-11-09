@@ -4,8 +4,24 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.gestures.animateScrollBy
 import android.content.ClipData
+import android.content.ComponentCallbacks2
 import android.content.Intent
+import android.content.res.Configuration
+import android.os.SystemClock
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.union
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.layout.LocalPinnableContainer
+import androidx.compose.ui.layout.PinnableContainer
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.text
@@ -75,6 +91,7 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.toClipEntry
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -138,6 +155,28 @@ fun PdfView(
     val opened = (state as? UiState.Success)?.data
     DisposableEffect(opened) {
         onDispose { opened?.close() }
+    }
+    // Give cached renders and decoded pages back when the system is short of memory or the app
+    // goes to the background; a large scanned PDF can otherwise hold a few hundred megabytes.
+    DisposableEffect(opened, context) {
+        val callbacks = object : ComponentCallbacks2 {
+            // From "running low" up: memory short while in use, or the app has been left. The
+            // running levels are deprecated (newer Android sends only the hidden and background
+            // ones), but older versions still send them.
+            @Suppress("DEPRECATION")
+            override fun onTrimMemory(level: Int) {
+                if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) opened?.trimMemory()
+            }
+
+            override fun onConfigurationChanged(newConfig: Configuration) = Unit
+
+            @Deprecated("Superseded by onTrimMemory")
+            override fun onLowMemory() {
+                opened?.trimMemory()
+            }
+        }
+        context.registerComponentCallbacks(callbacks)
+        onDispose { context.unregisterComponentCallbacks(callbacks) }
     }
 
     val prompt = passwordPrompt
@@ -220,7 +259,15 @@ private fun PdfContent(
         }
     }
 
-    val pageSidePadding = with(density) { PvotSpacing.L.toPx() }
+    // In landscape the camera cutout, and a three-button navigation bar, sit at the sides; pages
+    // keep clear of them as well as the usual margin.
+    val layoutDirection = LocalLayoutDirection.current
+    val sideInsets = WindowInsets.displayCutout.union(WindowInsets.navigationBars)
+        .only(WindowInsetsSides.Horizontal).asPaddingValues()
+    val pageStart = PvotSpacing.L + sideInsets.calculateStartPadding(layoutDirection)
+    val pageEnd = PvotSpacing.L + sideInsets.calculateEndPadding(layoutDirection)
+    val pageStartPx = with(density) { pageStart.toPx() }
+    val pageEndPx = with(density) { pageEnd.toPx() }
     val pageGapPx = with(density) { PvotSpacing.S.toPx() }
     var scrollJob by remember { mutableStateOf<Job?>(null) }
 
@@ -239,7 +286,7 @@ private fun PdfContent(
             val item = info.visibleItemsInfo.firstOrNull { it.index == pageIndex } ?: return@launch
             val width = info.viewportSize.width.toFloat()
             val height = info.viewportSize.height.toFloat()
-            val pageWidth = width - pageSidePadding * 2
+            val pageWidth = width - pageStartPx - pageEndPx
             // List coordinates: from the top-left of the list's own (unzoomed) box.
             val pointY = item.offset - info.viewportStartOffset + yFraction * item.size
             // Screen = (list - centre) * scale + centre + offset; graphicsLayer zooms about the centre.
@@ -250,7 +297,7 @@ private fun PdfContent(
             val visibleBottom = (height - barHeight).coerceAtLeast(visibleTop + 1f)
             val targetY = visibleTop + (visibleBottom - visibleTop) * placeAt
             if (s > 1f && xFraction != null) {
-                val pointX = pageSidePadding + xFraction * pageWidth
+                val pointX = pageStartPx + xFraction * pageWidth
                 val maxX = width * (s - 1f) / 2f
                 zoom.offsetX = (-(pointX - width / 2f) * s).coerceIn(-maxX, maxX)
             }
@@ -344,6 +391,40 @@ private fun PdfContent(
         }
     }
 
+    // When the width changes (rotation, split screen), pages change height, and a scroll offset
+    // kept in pixels would land somewhere else on the page. So the place is kept as a fraction of
+    // the page and put back once the list has been laid out at the new width. Zoom offsets are
+    // in pixels too, so zoom goes back to the whole page.
+    LaunchedEffect(document) {
+        var lastWidth = 0
+        var anchorPage = 0
+        var anchorFraction = 0f
+        snapshotFlow { Triple(listState.layoutInfo.viewportSize.width, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) }
+            .collect { (width, index, offset) ->
+                if (width == 0) return@collect
+                if (lastWidth != 0 && width != lastWidth) {
+                    lastWidth = width
+                    zoom.scale = 1f
+                    zoom.offsetX = 0f
+                    zoom.offsetY = 0f
+                    // The old pixel offset may have carried the list past the anchor page, so go
+                    // to it first; its new height is known once it has been laid out.
+                    listState.scrollToItem(anchorPage)
+                    val size = withTimeoutOrNull(RestoreLayoutTimeoutMillis) {
+                        snapshotFlow { listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == anchorPage }?.size }
+                            .filterNotNull()
+                            .first()
+                    } ?: 0
+                    listState.scrollToItem(anchorPage, (anchorFraction * size).roundToInt())
+                } else {
+                    lastWidth = width
+                    val size = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }?.size ?: return@collect
+                    anchorPage = index
+                    anchorFraction = offset.toFloat() / size.coerceAtLeast(1)
+                }
+            }
+    }
+
     // Reopening a document picks up where reading stopped. Nothing is saved until the old
     // position has been restored, so the first frame at page 1 can't overwrite it.
     var positionRestored by remember(document) { mutableStateOf(false) }
@@ -407,35 +488,93 @@ private fun PdfContent(
         }
     }
 
+    // Auto-scroll while a selection drag is held near the top or bottom of the visible document:
+    // the finger can't reach text that's off screen, so the document comes to it. While it
+    // scrolls, the selection keeps following whatever is now under the still finger.
+    var dragFinger by remember(document) { mutableStateOf<Offset?>(null) }
+    val dragApply = remember(document) { DragApply() }
+    val topPaddingPx = with(density) { topPadding.toPx() }
+    val edgeZonePx = with(density) { AutoScrollEdge.toPx() }
+    val maxScrollPx = with(density) { AutoScrollMaxSpeed.toPx() }
+
+    fun dragMoved(windowPosition: Offset, apply: (Offset) -> Unit) {
+        dragApply.apply = apply
+        dragFinger = windowPosition
+        apply(windowPosition)
+    }
+
+    fun dragEnded() {
+        dragFinger = null
+    }
+
+    LaunchedEffect(dragFinger != null) {
+        if (dragFinger == null) return@LaunchedEffect
+        var last = withFrameNanos { it }
+        while (true) {
+            val now = withFrameNanos { it }
+            val seconds = (now - last) / 1_000_000_000f
+            last = now
+            val finger = dragFinger ?: break
+            val coords = listCoordinates.value?.takeIf { it.isAttached } ?: continue
+            // The visible document: below the top bar, above the selection bar.
+            val top = coords.localToWindow(Offset.Zero).y + topPaddingPx
+            val bottom = coords.localToWindow(Offset(0f, coords.size.height.toFloat())).y - selectionState.barHeightPx
+            val depth = when {
+                finger.y < top + edgeZonePx -> -((top + edgeZonePx - finger.y) / edgeZonePx)
+                finger.y > bottom - edgeZonePx -> (finger.y - (bottom - edgeZonePx)) / edgeZonePx
+                else -> 0f
+            }.coerceIn(-1f, 1f)
+            if (depth != 0f) {
+                // Faster the deeper into the edge; the list scrolls in unzoomed units.
+                val scrolled = listState.dispatchRawDelta(depth * maxScrollPx * seconds / zoom.scale)
+                if (scrolled != 0f) dragApply.apply(finger)
+            }
+        }
+    }
+
     val context = LocalContext.current
     val shareTitle = stringResource(R.string.viewer_pdf_share_selection)
 
+    val truncatedMessage = pluralStringResource(R.plurals.viewer_pdf_selection_truncated, SelectionTextLimit, SelectionTextLimit)
+
     /** The selected text, read page by page (Pdfium text for pages not on screen is loaded as
-     * needed), with a line break between pages. */
-    suspend fun selectedText(sel: DocSelection): String = buildString {
+     * needed), with a line break between pages, and whether it was cut short. It stops at
+     * [SelectionTextLimit] characters: the clipboard and the share sheet both go through a
+     * size-limited binder transaction (10 MB of text from a 2,000-page Select all crashed the app),
+     * and stopping early also saves reading every page of a long document. */
+    suspend fun selectedText(sel: DocSelection): Pair<String, Boolean> {
+        val text = StringBuilder()
+        var truncated = false
         for (page in sel.start.page..sel.end.page) {
             val pageText = document.pageText(page)
             val range = sel.rangeOn(page, pageText.text.lastIndex) ?: continue
-            if (isNotEmpty()) append('\n')
-            append(pageText.text.substring(range.first, (range.last + 1).coerceAtMost(pageText.text.length)))
+            if (text.isNotEmpty()) text.append('\n')
+            text.append(pageText.text, range.first, (range.last + 1).coerceAtMost(pageText.text.length))
+            if (text.length >= SelectionTextLimit) {
+                truncated = text.length > SelectionTextLimit || page < sel.end.page
+                text.setLength(SelectionTextLimit)
+                break
+            }
         }
-    }.replace("\r\n", "\n").trim()
+        return text.toString().replace("\r\n", "\n").trim() to truncated
+    }
 
     DisposableEffect(selectionState, document) {
         selectionState.onCopy = {
             selection?.let { sel ->
                 scope.launch {
-                    val text = selectedText(sel)
+                    val (text, truncated) = selectedText(sel)
                     clipboard.setClipEntry(ClipData.newPlainText(clipLabel, text).toClipEntry())
                     selection = null
+                    if (truncated) selectionState.notice = truncatedMessage
                 }
             }
         }
         selectionState.onShare = {
             selection?.let { sel ->
                 scope.launch {
-                    // A share Intent travels through a size-limited binder transaction.
-                    val text = selectedText(sel).take(ShareTextLimit)
+                    val (text, truncated) = selectedText(sel)
+                    if (truncated) selectionState.notice = truncatedMessage
                     val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
                     context.startActivity(Intent.createChooser(send, shareTitle))
                     selection = null
@@ -447,7 +586,7 @@ private fun PdfContent(
                 scope.launch {
                     // A search query is one line of text: the PDF keeps line breaks between lines,
                     // so a query joining two lines would never match. The first line it is.
-                    val query = selectedText(sel).lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }
+                    val query = selectedText(sel).first.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }
                         .orEmpty().take(SearchFromSelectionLimit).trim()
                     selection = null
                     if (query.isNotEmpty()) {
@@ -499,8 +638,8 @@ private fun PdfContent(
                 },
             contentPadding = PaddingValues(
                 top = topPadding + PvotSpacing.M,
-                start = PvotSpacing.L,
-                end = PvotSpacing.L,
+                start = pageStart,
+                end = pageEnd,
                 // Room to scroll the last page clear of the search bar.
                 bottom = if (search.active) SearchBarClearance else PvotSpacing.M,
             ),
@@ -527,14 +666,17 @@ private fun PdfContent(
                     onLongPressDrag = { windowPosition ->
                         val word = pressedWord
                         if (word != null && selection != null) {
-                            pages.charAt(windowPosition)?.let { pos ->
-                                // Dragging back past the pressed word keeps all of that word, by
-                                // anchoring on its far end.
-                                selection = if (pos < word.start) DocSelection(word.end, pos)
-                                else DocSelection(word.start, maxOf(pos, word.end))
+                            dragMoved(windowPosition) { finger ->
+                                pages.charAt(finger)?.let { pos ->
+                                    // Dragging back past the pressed word keeps all of that word,
+                                    // by anchoring on its far end.
+                                    selection = if (pos < word.start) DocSelection(word.end, pos)
+                                    else DocSelection(word.start, maxOf(pos, word.end))
+                                }
                             }
                         }
                     },
+                    onLongPressEnd = ::dragEnded,
                     onClearSelection = { selection = null },
                     pageFilter = reading.pageFilter,
                     onDoubleTap = ::toggleZoomAt,
@@ -556,13 +698,21 @@ private fun PdfContent(
                 SelectionHandle(
                     color = handleColor,
                     position = { pages.handlePosition(sel.start, start = true, overlay, scrollTick(listState, zoom)) },
-                    onDrag = { windowPosition -> pages.charAt(windowPosition)?.let { selection = DocSelection(sel.end, it) } },
+                    onDrag = { windowPosition ->
+                        val fixed = sel.end
+                        dragMoved(windowPosition) { finger -> pages.charAt(finger)?.let { selection = DocSelection(fixed, it) } }
+                    },
+                    onDragEnd = ::dragEnded,
                     toWindow = { overlay?.takeIf { c -> c.isAttached }?.localToWindow(it) },
                 )
                 SelectionHandle(
                     color = handleColor,
                     position = { pages.handlePosition(sel.end, start = false, overlay, scrollTick(listState, zoom)) },
-                    onDrag = { windowPosition -> pages.charAt(windowPosition)?.let { selection = DocSelection(sel.start, it) } },
+                    onDrag = { windowPosition ->
+                        val fixed = sel.start
+                        dragMoved(windowPosition) { finger -> pages.charAt(finger)?.let { selection = DocSelection(fixed, it) } }
+                    },
+                    onDragEnd = ::dragEnded,
                     toWindow = { overlay?.takeIf { c -> c.isAttached }?.localToWindow(it) },
                 )
             }
@@ -614,7 +764,11 @@ internal fun pagePaper(dark: Boolean): Color = if (dark) Color.Black else Color.
 
 private const val DoubleTapZoom = 2.5f
 private const val SavePositionMillis = 1000L
-private const val ShareTextLimit = 100_000
+private const val SelectionTextLimit = 100_000
+/** How close to the top or bottom of the visible document a selection drag starts scrolling. */
+private val AutoScrollEdge = 56.dp
+/** Auto-scroll speed per second with the finger right at the edge. */
+private val AutoScrollMaxSpeed = 1200.dp
 private const val SearchFromSelectionLimit = 100
 private const val RestoreLayoutTimeoutMillis = 1000L
 
@@ -732,6 +886,30 @@ private class CoordinatesHolder {
     var value: LayoutCoordinates? = null
 }
 
+private class BooleanHolder {
+    var value = false
+}
+
+/** The current drag's "apply the selection at this finger position", re-run as auto-scroll moves
+ * the text under a finger that's holding still. */
+private class DragApply {
+    var apply: (Offset) -> Unit = {}
+}
+
+/** Keeps a lazy list item composed while pinned, however far it scrolls away. */
+private class PinHolder {
+    private var handle: PinnableContainer.PinnedHandle? = null
+
+    fun pin(container: PinnableContainer?) {
+        if (handle == null) handle = container?.pin()
+    }
+
+    fun release() {
+        handle?.release()
+        handle = null
+    }
+}
+
 @Composable
 private fun PdfPageItem(
     document: PdfiumDocument,
@@ -744,6 +922,7 @@ private fun PdfPageItem(
     pages: PageRegistry,
     onLongPress: (windowPosition: Offset) -> Unit,
     onLongPressDrag: (windowPosition: Offset) -> Unit,
+    onLongPressEnd: () -> Unit,
     onClearSelection: () -> Unit,
     pageFilter: ColorFilter?,
     onDoubleTap: (windowPosition: Offset) -> Unit,
@@ -811,6 +990,11 @@ private fun PdfPageItem(
     val currentSelection = rememberUpdatedState(selection)
     val currentLinks = rememberUpdatedState(links)
     val linkSlopPx = with(LocalDensity.current) { PvotSpacing.XS.toPx() }
+    // A selection drag that auto-scrolls can carry this page off screen; pinned, the list keeps it
+    // (and so the drag) alive until the finger lifts.
+    val pinnable = LocalPinnableContainer.current
+    val pinned = remember { PinHolder() }
+    DisposableEffect(Unit) { onDispose { pinned.release() } }
     val selectedRange = text?.let { selection?.rangeOn(index, it.text.lastIndex) }
     val pageDescription = stringResource(R.string.viewer_pdf_page_description, index + 1, document.pageCount)
 
@@ -837,20 +1021,38 @@ private fun PdfPageItem(
                     detectDragGesturesAfterLongPress(
                         onDragStart = { position ->
                             if (currentText.value == null) return@detectDragGesturesAfterLongPress
+                            pinned.pin(pinnable)
                             toWindow(position)?.let(onLongPress)
                         },
                         onDrag = { change, _ -> toWindow(change.position)?.let(onLongPressDrag) },
+                        onDragEnd = {
+                            pinned.release()
+                            onLongPressEnd()
+                        },
+                        onDragCancel = {
+                            pinned.release()
+                            onLongPressEnd()
+                        },
                     )
                 }
                 .pointerInput(index) {
+                    // A long press belongs to text selection above, but letting go of one also
+                    // counts as a tap here, and a tap clears the selection. So a press held past
+                    // the long-press time isn't a tap. (Passing onLongPress instead would have
+                    // this detector swallow the rest of the gesture, cancelling the selection drag.)
+                    var pressMillis = 0L
+                    val longPressMillis = viewConfiguration.longPressTimeoutMillis
                     detectTapGestures(
-                        // A long press belongs to text selection above; without this, letting go
-                        // of one would also count as a tap, and the tap clears the selection.
-                        onLongPress = {},
+                        onPress = {
+                            val down = SystemClock.uptimeMillis()
+                            tryAwaitRelease()
+                            pressMillis = SystemClock.uptimeMillis() - down
+                        },
                         onDoubleTap = { position ->
                             coordinates.value?.takeIf { it.isAttached }?.let { onDoubleTap(it.localToWindow(position)) }
                         },
                         onTap = { position ->
+                        if (pressMillis >= longPressMillis) return@detectTapGestures
                         if (currentSelection.value != null) {
                             onClearSelection()
                             return@detectTapGestures
@@ -1022,8 +1224,16 @@ private fun SelectionHandle(
     color: Color,
     position: () -> Offset?,
     onDrag: (windowPosition: Offset) -> Unit,
+    onDragEnd: () -> Unit,
     toWindow: (Offset) -> Offset?,
 ) {
+    val currentOnDragEnd = rememberUpdatedState(onDragEnd)
+    // If the handle leaves mid-drag (its text scrolled away), the drag ends with it, so
+    // auto-scroll doesn't run on with no finger behind it.
+    val dragging = remember { BooleanHolder() }
+    DisposableEffect(Unit) {
+        onDispose { if (dragging.value) currentOnDragEnd.value() }
+    }
     val at = position() ?: return
     val handleSize = 24.dp
     val half = with(LocalDensity.current) { (handleSize / 2).roundToPx() }
@@ -1037,7 +1247,17 @@ private fun SelectionHandle(
             .offset { IntOffset(at.x.roundToInt() - half, at.y.roundToInt()) }
             .size(handleSize)
             .pointerInput(Unit) {
-                detectDragGestures { change, _ ->
+                detectDragGestures(
+                    onDragStart = { dragging.value = true },
+                    onDragEnd = {
+                        dragging.value = false
+                        currentOnDragEnd.value()
+                    },
+                    onDragCancel = {
+                        dragging.value = false
+                        currentOnDragEnd.value()
+                    },
+                ) { change, _ ->
                     change.consume()
                     val local = currentAt.value + change.position - Offset(half.toFloat(), 0f)
                     currentToWindow.value(local)?.let(currentOnDrag.value)

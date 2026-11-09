@@ -10,6 +10,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.union
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -60,14 +67,18 @@ internal fun PdfPageOverview(
     val gridState = rememberLazyGridState()
     LaunchedEffect(Unit) { gridState.scrollToItem(currentPage) }
     val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    // Clear of the camera cutout and a side navigation bar in landscape, like the pages.
+    val layoutDirection = LocalLayoutDirection.current
+    val sides = WindowInsets.displayCutout.union(WindowInsets.navigationBars)
+        .only(WindowInsetsSides.Horizontal).asPaddingValues()
 
     LazyVerticalGrid(
         columns = GridCells.Adaptive(ThumbnailMinWidth),
         state = gridState,
         modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(
-            start = PvotSpacing.L,
-            end = PvotSpacing.L,
+            start = PvotSpacing.L + sides.calculateStartPadding(layoutDirection),
+            end = PvotSpacing.L + sides.calculateEndPadding(layoutDirection),
             top = topPadding + PvotSpacing.M,
             bottom = bottom + PvotSpacing.L,
         ),

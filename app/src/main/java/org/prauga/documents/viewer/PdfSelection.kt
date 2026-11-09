@@ -10,10 +10,12 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.stringResource
 import com.prauga.pvot.designsystem.components.button.PvotButton
 import com.prauga.pvot.designsystem.components.button.PvotButtonStyle
@@ -56,6 +58,14 @@ class PdfSelectionState {
     var active by mutableStateOf(false)
         internal set
 
+    /** Height of [PdfSelectionBar] from the bottom of the screen, so a selection drag knows
+     * where the visible document ends and auto-scrolls before the finger reaches the bar. */
+    var barHeightPx by mutableIntStateOf(0)
+        internal set
+
+    /** A message for the viewer to show, such as a copy cut short; cleared once shown. */
+    var notice by mutableStateOf<String?>(null)
+
     internal var onCopy: () -> Unit = {}
     internal var onShare: () -> Unit = {}
     internal var onSearch: () -> Unit = {}
@@ -70,6 +80,7 @@ fun PdfSelectionBar(state: PdfSelectionState, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .onSizeChanged { state.barHeightPx = it.height }
             .windowInsetsPadding(WindowInsets.navigationBars)
             .padding(horizontal = PvotSpacing.L, vertical = PvotSpacing.M)
             .pvotGlassSurface(
