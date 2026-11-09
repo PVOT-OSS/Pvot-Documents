@@ -86,18 +86,31 @@ import kotlin.math.roundToInt
  * sharp. In-process matters: androidx.pdf is Pdfium too, but behind a system service whose
  * per-page binder round-trip stuttered visibly on scroll. See `CLAUDE.md`. */
 @Composable
-fun PdfView(uri: Uri, topPadding: Dp, search: PdfSearchState, modifier: Modifier = Modifier) {
+fun PdfView(
+    uri: Uri,
+    topPadding: Dp,
+    search: PdfSearchState,
+    navigation: PdfNavigationState,
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     var state by remember(uri) { mutableStateOf<UiState<PdfiumDocument>>(UiState.Loading) }
     var retryToken by remember(uri) { mutableIntStateOf(0) }
+    // The password the user typed, kept only while this document is open.
+    var password by remember(uri) { mutableStateOf<String?>(null) }
+    // Non-null while the document is waiting for a password; true once one has been tried and failed.
+    var passwordPrompt by remember(uri) { mutableStateOf<Boolean?>(null) }
     val readFailedMessage = stringResource(R.string.viewer_read_failed)
 
-    LaunchedEffect(uri, retryToken) {
+    LaunchedEffect(uri, retryToken, password) {
         state = UiState.Loading
         state = try {
-            UiState.Success(PdfiumDocument.open(context, uri))
+            UiState.Success(PdfiumDocument.open(context, uri, password)).also { passwordPrompt = null }
         } catch (e: CancellationException) {
             throw e
+        } catch (e: PdfPasswordRequiredException) {
+            passwordPrompt = e.passwordWasGiven
+            UiState.Loading
         } catch (e: Exception) {
             UiState.Error(readFailedMessage, e)
         }
@@ -106,6 +119,21 @@ fun PdfView(uri: Uri, topPadding: Dp, search: PdfSearchState, modifier: Modifier
     val opened = (state as? UiState.Success)?.data
     DisposableEffect(opened) {
         onDispose { opened?.close() }
+    }
+
+    val prompt = passwordPrompt
+    if (prompt != null) {
+        PdfPasswordPrompt(
+            wrongPassword = prompt,
+            attempt = retryToken,
+            // Bumping the token retries even when the same password is entered again.
+            onSubmit = {
+                password = it
+                retryToken++
+            },
+            modifier = modifier.padding(top = topPadding),
+        )
+        return
     }
 
     when (val current = state) {
@@ -117,7 +145,13 @@ fun PdfView(uri: Uri, topPadding: Dp, search: PdfSearchState, modifier: Modifier
                 onRetry = { retryToken++ },
             )
         }
-        is UiState.Success -> PdfContent(document = current.data, topPadding = topPadding, search = search, modifier = modifier)
+        is UiState.Success -> PdfContent(
+            document = current.data,
+            topPadding = topPadding,
+            search = search,
+            navigation = navigation,
+            modifier = modifier,
+        )
     }
 }
 
@@ -129,7 +163,13 @@ private data class PageSelection(val anchor: Int, val focus: Int) {
 }
 
 @Composable
-private fun PdfContent(document: PdfiumDocument, topPadding: Dp, search: PdfSearchState, modifier: Modifier) {
+private fun PdfContent(
+    document: PdfiumDocument,
+    topPadding: Dp,
+    search: PdfSearchState,
+    navigation: PdfNavigationState,
+    modifier: Modifier,
+) {
     val zoom = remember(document) { PdfZoomState() }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -161,40 +201,53 @@ private fun PdfContent(document: PdfiumDocument, topPadding: Dp, search: PdfSear
     }
 
     val pageSidePadding = with(density) { PvotSpacing.L.toPx() }
+    val pageGapPx = with(density) { PvotSpacing.S.toPx() }
     var scrollJob by remember { mutableStateOf<Job?>(null) }
 
-    /** Brings [match] to a third of the way down the visible area (below the search bar), at the
-     * current zoom: the list scrolls it into place vertically, and when zoomed in the view pans
-     * sideways so it isn't left off screen. Measured from the live layout, so the keyboard or the
-     * search bar changing the viewport doesn't throw it off. */
-    fun scrollToMatch(match: SearchMatch) {
+    /** Scrolls so the point at [yFraction] down page [pageIndex] lands [placeAt] of the way down
+     * the visible area (below the top bar, above the search bar when it's open), at the current
+     * zoom. With [xFraction], a zoomed-in view also pans sideways to bring that point on screen.
+     * Measured from the live layout, so the keyboard or the search bar changing the viewport
+     * doesn't throw it off. */
+    fun scrollToPagePoint(pageIndex: Int, yFraction: Float, placeAt: Float, xFraction: Float? = null) {
         scrollJob?.cancel()
         scrollJob = scope.launch {
-            if (listState.layoutInfo.visibleItemsInfo.none { it.index == match.pageIndex }) {
-                listState.scrollToItem(match.pageIndex)
+            if (listState.layoutInfo.visibleItemsInfo.none { it.index == pageIndex }) {
+                listState.scrollToItem(pageIndex)
             }
             val info = listState.layoutInfo
-            val item = info.visibleItemsInfo.firstOrNull { it.index == match.pageIndex } ?: return@launch
-            val rect = match.rects.first()
+            val item = info.visibleItemsInfo.firstOrNull { it.index == pageIndex } ?: return@launch
             val width = info.viewportSize.width.toFloat()
             val height = info.viewportSize.height.toFloat()
             val pageWidth = width - pageSidePadding * 2
             // List coordinates: from the top-left of the list's own (unzoomed) box.
-            val matchY = item.offset - info.viewportStartOffset + (rect.top + rect.bottom) / 2f * item.size
-            val matchX = pageSidePadding + (rect.left + rect.right) / 2f * pageWidth
+            val pointY = item.offset - info.viewportStartOffset + yFraction * item.size
             // Screen = (list - centre) * scale + centre + offset; graphicsLayer zooms about the centre.
             val s = zoom.scale
             val visibleTop = info.beforeContentPadding.toFloat()
             // The search bar, riding on the keyboard, floats over the bottom of the list.
-            val visibleBottom = (height - search.barHeightPx).coerceAtLeast(visibleTop + 1f)
-            val targetY = visibleTop + (visibleBottom - visibleTop) / 3f
-            if (s > 1f) {
+            val barHeight = if (search.active) search.barHeightPx else 0
+            val visibleBottom = (height - barHeight).coerceAtLeast(visibleTop + 1f)
+            val targetY = visibleTop + (visibleBottom - visibleTop) * placeAt
+            if (s > 1f && xFraction != null) {
+                val pointX = pageSidePadding + xFraction * pageWidth
                 val maxX = width * (s - 1f) / 2f
-                zoom.offsetX = (-(matchX - width / 2f) * s).coerceIn(-maxX, maxX)
+                zoom.offsetX = (-(pointX - width / 2f) * s).coerceIn(-maxX, maxX)
             }
-            val delta = matchY - height / 2f - (targetY - height / 2f - zoom.offsetY) / s
+            val delta = pointY - height / 2f - (targetY - height / 2f - zoom.offsetY) / s
             listState.animateScrollBy(delta)
         }
+    }
+
+    /** Brings [match] a third of the way down the visible area, where the eye lands first. */
+    fun scrollToMatch(match: SearchMatch) {
+        val rect = match.rects.first()
+        scrollToPagePoint(
+            pageIndex = match.pageIndex,
+            yFraction = (rect.top + rect.bottom) / 2f,
+            placeAt = 1f / 3f,
+            xFraction = (rect.left + rect.right) / 2f,
+        )
     }
 
     LaunchedEffect(search.query, document) {
@@ -224,6 +277,55 @@ private fun PdfContent(document: PdfiumDocument, topPadding: Dp, search: PdfSear
             search.step = {}
         }
     }
+
+    DisposableEffect(navigation, document) {
+        navigation.pageCount = document.pageCount
+        navigation.currentPage = 0
+        navigation.goTo = { page -> scrollToPagePoint(page, yFraction = 0f, placeAt = 0f) }
+        onDispose {
+            navigation.pageCount = 0
+            navigation.outline = emptyList()
+            navigation.indicatorVisible = false
+            navigation.goTo = {}
+        }
+    }
+    LaunchedEffect(navigation, document) {
+        navigation.outline = document.outline()
+    }
+    // The page on screen is the one under the middle of the viewport; at the very end of the
+    // document, where a short last page may never reach the middle, it's the last page.
+    LaunchedEffect(navigation, document) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val items = info.visibleItemsInfo
+            if (items.isEmpty()) {
+                0
+            } else if (!listState.canScrollForward && zoom.scale <= 1f) {
+                items.last().index
+            } else {
+                val centre = info.viewportSize.height / 2f
+                // The list point under the screen's centre, undoing the zoom about that centre.
+                val listY = centre - zoom.offsetY / zoom.scale
+                (items.firstOrNull { item ->
+                    val top = item.offset - info.viewportStartOffset
+                    listY >= top && listY < top + item.size + pageGapPx
+                } ?: items.first()).index
+            }
+        }.collect { navigation.currentPage = it }
+    }
+    // The indicator shows while the document moves and for a moment after, including on open.
+    LaunchedEffect(navigation, document) {
+        snapshotFlow {
+            listOf(listState.firstVisibleItemIndex.toFloat(), listState.firstVisibleItemScrollOffset.toFloat(), zoom.offsetY)
+        }.collectLatest {
+            navigation.indicatorVisible = true
+            delay(PageIndicatorHideMillis)
+            navigation.indicatorVisible = false
+        }
+    }
+
+    var pendingLink by remember(document) { mutableStateOf<String?>(null) }
+    pendingLink?.let { link -> OpenLinkDialog(link, onDismiss = { pendingLink = null }) }
 
     Box(modifier = modifier) {
         LazyColumn(
@@ -265,6 +367,10 @@ private fun PdfContent(document: PdfiumDocument, topPadding: Dp, search: PdfSear
                         selectionPage = if (sel == null) -1 else index
                         selection = sel
                     },
+                    onLinkTap = { link ->
+                        val dest = link.destPage
+                        if (dest != null) navigation.goToPage(dest) else pendingLink = link.uri
+                    },
                     onCopy = { text ->
                         scope.launch { clipboard.setClipEntry(ClipData.newPlainText(clipLabel, text).toClipEntry()) }
                         selectionPage = -1
@@ -279,6 +385,7 @@ private fun PdfContent(document: PdfiumDocument, topPadding: Dp, search: PdfSear
 private val SearchBarClearance = 96.dp
 private const val SearchDebounceMillis = 250L
 private const val HiResSettleMillis = 150L
+private const val PageIndicatorHideMillis = 1500L
 
 /** The whole document's zoom and pan — pinch scales the entire scrolling document in place, as a
  * PDF reader does, rather than one page inside its own frame. Offsets are in screen pixels. */
@@ -399,12 +506,14 @@ private fun PdfPageItem(
     currentHighlight: List<PageRect>?,
     selection: PageSelection?,
     onSelectionChange: (PageSelection?) -> Unit,
+    onLinkTap: (PageLink) -> Unit,
     onCopy: (String) -> Unit,
 ) {
     var size by remember { mutableStateOf(IntSize.Zero) }
     var page by remember(index) { mutableStateOf<ImageBitmap?>(null) }
     var tile by remember(index) { mutableStateOf<HiResTile?>(null) }
     var text by remember(index) { mutableStateOf<PageText?>(null) }
+    var links by remember(index) { mutableStateOf<List<PageLink>>(emptyList()) }
     val coordinates = remember { CoordinatesHolder() }
 
     LaunchedEffect(index, size) {
@@ -413,6 +522,7 @@ private fun PdfPageItem(
         page = (document.cachedPage(index, size.width) ?: document.renderPage(index, size.width, size.height))
             .asImageBitmap()
         text = document.pageText(index)
+        links = document.pageLinks(index)
     }
 
     LaunchedEffect(viewportSettled, size, page != null) {
@@ -454,6 +564,8 @@ private fun PdfPageItem(
     // rather than capturing whatever value was current when they started.
     val currentText = rememberUpdatedState(text)
     val currentSelection = rememberUpdatedState(selection)
+    val currentLinks = rememberUpdatedState(links)
+    val linkSlopPx = with(LocalDensity.current) { PvotSpacing.XS.toPx() }
     // The word a long press landed on, which a drag from that press extends from.
     var pressedWord by remember { mutableStateOf(IntRange.EMPTY) }
 
@@ -491,7 +603,21 @@ private fun PdfPageItem(
                     )
                 }
                 .pointerInput(index) {
-                    detectTapGestures(onTap = { if (currentSelection.value != null) onSelectionChange(null) })
+                    detectTapGestures(onTap = { position ->
+                        if (currentSelection.value != null) {
+                            onSelectionChange(null)
+                            return@detectTapGestures
+                        }
+                        // A little slop around each link, since link boxes are often just the
+                        // height of a line of small text.
+                        currentLinks.value.firstOrNull { link ->
+                            val r = link.rect
+                            position.x >= r.left * size.width - linkSlopPx &&
+                                position.x <= r.right * size.width + linkSlopPx &&
+                                position.y >= r.top * size.height - linkSlopPx &&
+                                position.y <= r.bottom * size.height + linkSlopPx
+                        }?.let(onLinkTap)
+                    })
                 },
         ) {
             Canvas(modifier = Modifier.matchParentSize()) {

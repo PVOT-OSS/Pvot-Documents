@@ -9,6 +9,8 @@ import android.util.LruCache
 import io.legere.pdfiumandroid.PdfDocument
 import io.legere.pdfiumandroid.PdfPage
 import io.legere.pdfiumandroid.PdfiumCore
+import io.legere.pdfiumandroid.api.Bookmark
+import io.legere.pdfiumandroid.api.PdfPasswordException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,6 +29,17 @@ internal data class PageRect(val left: Float, val top: Float, val right: Float, 
 internal class PageText(val text: String, val boxes: List<PageRect?>)
 
 internal data class SearchMatch(val pageIndex: Int, val rects: List<PageRect>)
+
+/** A link on a page: tapping [rect] goes to [destPage] in this document, or opens [uri]. */
+internal data class PageLink(val rect: PageRect, val destPage: Int?, val uri: String?)
+
+/** One entry of the document's outline (its bookmarks), flattened in reading order; [depth] is 0
+ * for top-level entries. */
+data class OutlineEntry(val title: String, val pageIndex: Int, val depth: Int)
+
+/** Thrown by [PdfiumDocument.open] when the document is encrypted and [password] was missing or
+ * wrong. */
+internal class PdfPasswordRequiredException(val passwordWasGiven: Boolean) : Exception()
 
 /** One open PDF, rendered and searched in-process by Pdfium. Every Pdfium call runs on one
  * serial background dispatcher: Pdfium isn't thread-safe, and serialising also keeps a long search
@@ -54,6 +67,7 @@ internal class PdfiumDocument private constructor(
     }
 
     private val pageTexts = LruCache<Int, PageText>(TextCacheCount)
+    private val pageLinkCache = LruCache<Int, List<PageLink>>(TextCacheCount)
 
     val pageCount: Int get() = pageAspects.size
 
@@ -104,6 +118,39 @@ internal class PdfiumDocument private constructor(
         }
         pageTexts.put(index, text)
         text
+    }
+
+    /** The page's link annotations, in [PageRect] fractions like everything else on the page. */
+    suspend fun pageLinks(index: Int): List<PageLink> = withContext(pdfium) {
+        pageLinkCache.get(index)?.let { return@withContext it }
+        val page = page(index)
+        val toPage = pageMapper(page)
+        val links = page.getPageLinks().mapNotNull { link ->
+            val dest = link.destPageIdx?.takeIf { it in 0 until pageCount }
+            // A bare "www." address is a web link that left off its scheme.
+            val uri = link.uri?.trim()
+                ?.let { if (it.startsWith("www.", ignoreCase = true)) "https://$it" else it }
+                ?.takeIf(::isOpenableLink)
+            if (dest == null && uri == null) null else PageLink(toPage(link.bounds), dest, uri)
+        }
+        pageLinkCache.put(index, links)
+        links
+    }
+
+    /** The document's outline, flattened depth-first; empty when it has none. Entries pointing
+     * outside the document are dropped. */
+    suspend fun outline(): List<OutlineEntry> = withContext(pdfium) {
+        buildList {
+            fun walk(bookmarks: List<Bookmark>, depth: Int) {
+                for (b in bookmarks) {
+                    val page = b.pageIdx.toInt()
+                    val title = b.title?.trim().orEmpty()
+                    if (title.isNotEmpty() && page in 0 until pageCount) add(OutlineEntry(title, page, depth))
+                    walk(b.children, depth + 1)
+                }
+            }
+            walk(doc.getTableOfContents(), 0)
+        }
     }
 
     /** Every case-insensitive match of [query], in page order, each with the rectangles it covers
@@ -178,11 +225,16 @@ internal class PdfiumDocument private constructor(
 
         /** Opens [uri] through its file descriptor rather than reading it into memory, so a large
          * scanned document isn't copied whole into the heap just to be viewed. */
-        suspend fun open(context: Context, uri: Uri): PdfiumDocument = withContext(Dispatchers.IO) {
+        suspend fun open(context: Context, uri: Uri, password: String? = null): PdfiumDocument = withContext(Dispatchers.IO) {
             val fd = context.contentResolver.openFileDescriptor(uri, "r")
                 ?: throw IOException("Could not open $uri")
             try {
-                val doc = PdfiumCore(context).newDocument(fd)
+                val doc = try {
+                    val core = PdfiumCore(context)
+                    if (password == null) core.newDocument(fd) else core.newDocument(fd, password)
+                } catch (_: PdfPasswordException) {
+                    throw PdfPasswordRequiredException(passwordWasGiven = password != null)
+                }
                 // Sizes in tenths of a point, read without opening any page; only the ratio is used.
                 val aspects = doc.getPageSizes(PageSizeDpi).map { size ->
                     (size.width.toFloat() / size.height).takeIf { it.isFinite() && it > 0f } ?: DefaultAspect

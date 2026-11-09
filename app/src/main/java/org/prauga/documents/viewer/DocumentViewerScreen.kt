@@ -60,9 +60,22 @@ fun DocumentViewerScreen(
     onBack: () -> Unit
 ) {
     val pdfSearch = remember { PdfSearchState() }
+    val pdfNavigation = remember { PdfNavigationState() }
+    var showGoToPage by remember { mutableStateOf(false) }
+    var showContents by remember { mutableStateOf(false) }
+    if (showGoToPage) GoToPageDialog(pdfNavigation, onDismiss = { showGoToPage = false })
+    if (showContents) PdfContentsSheet(pdfNavigation, onDismiss = { showContents = false })
+
     PvotScreenScaffold(
         topBar = {
             PvotTopBar(title = name, onBack = onBack, compact = true) {
+                if (pdfNavigation.outline.isNotEmpty() && !pdfSearch.active) {
+                    PvotTopBarAction(
+                        icon = painterResource(R.drawable.ic_list),
+                        contentDescription = stringResource(R.string.viewer_pdf_contents),
+                        onClick = { showContents = true }
+                    )
+                }
                 if (pdfSearch.available && !pdfSearch.active) {
                     PvotTopBarAction(
                         icon = painterResource(R.drawable.ic_search),
@@ -73,6 +86,14 @@ fun DocumentViewerScreen(
             }
         },
         bottomBar = {
+            // The page indicator and the search bar share the bottom; search, when open, wins.
+            AnimatedVisibility(
+                visible = !pdfSearch.active && pdfNavigation.indicatorVisible && pdfNavigation.pageCount > 1,
+                enter = fadeIn(tween(PvotDurations.Short)),
+                exit = fadeOut(tween(PvotDurations.Medium))
+            ) {
+                PdfPageIndicator(pdfNavigation, onClick = { showGoToPage = true })
+            }
             AnimatedVisibility(
                 visible = pdfSearch.active,
                 enter = fadeIn(tween(PvotDurations.Medium, easing = PvotMotion.Settle)) +
@@ -89,6 +110,7 @@ fun DocumentViewerScreen(
                 uri = uri,
                 topPadding = padding.calculateTopPadding(),
                 search = pdfSearch,
+                navigation = pdfNavigation,
                 modifier = Modifier.fillMaxSize()
             )
         } else if (format == ViewerFormat.Docx) {
