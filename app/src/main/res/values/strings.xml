@@ -23,6 +23,10 @@
     <string name="viewer_pdf_search_count">%1$d of %2$d</string>
     <string name="viewer_pdf_search_none">No matches</string>
     <string name="viewer_pdf_copy_selection">Copy</string>
+    <string name="viewer_pdf_share_selection">Share</string>
+    <string name="viewer_pdf_search_selection">Search</string>
+    <string name="viewer_pdf_select_all">Select all</string>
+    <string name="viewer_pdf_page_description">Page %1$d of %2$d</string>
     <string name="viewer_pdf_clip_label">Text from PDF</string>
     <string name="viewer_pdf_page_indicator">%1$d / %2$d</string>
     <string name="viewer_pdf_page_indicator_description">Page %1$d of %2$d. Go to page</string>
