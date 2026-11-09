@@ -6,13 +6,19 @@ data class PdfPageSize(val width: Float, val height: Float, val rotateDegrees: I
 
 data class PdfRect(val x: Float, val y: Float, val width: Float, val height: Float)
 
-/** A decoded page: its draw program plus a lazy accessor for the images it referenced. */
+/** A decoded page: its draw program plus a lazy, cached accessor for the images it referenced.
+ * Without the cache, an image-heavy page (a scanned document, say) would cross the JNI boundary
+ * and rebuild a full-resolution [Bitmap] from raw pixel bytes on *every* draw call — recomposition,
+ * scroll, zoom, a search highlight blinking, anything — rather than once per page load. */
 class PdfPage internal constructor(
     val ops: List<PdfDrawOp>,
     private val doc: PdfDocument,
     private val pageIndex: Int,
 ) {
-    fun imageBitmap(imageIndex: Int): Bitmap? = doc.imageBitmap(pageIndex, imageIndex)
+    private val bitmapCache = HashMap<Int, Bitmap?>()
+
+    fun imageBitmap(imageIndex: Int): Bitmap? =
+        bitmapCache.getOrPut(imageIndex) { doc.imageBitmap(pageIndex, imageIndex) }
 }
 
 /**
@@ -50,17 +56,31 @@ class PdfDocument private constructor(private var handle: Long) : AutoCloseable 
         if (width <= 0 || height <= 0) return null
         val pixels = PdfNative.nativeImagePixels(handle, pageIndex, imageIndex)
         if (pixels.size < width * height * 4) return null
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val intPixels = IntArray(width * height)
-        for (i in intPixels.indices) {
-            val o = i * 4
-            val r = pixels[o].toInt() and 0xFF
-            val g = pixels[o + 1].toInt() and 0xFF
-            val b = pixels[o + 2].toInt() and 0xFF
-            val a = pixels[o + 3].toInt() and 0xFF
-            intPixels[i] = (a shl 24) or (r shl 16) or (g shl 8) or b
+
+        // Scanned-page images routinely arrive at full camera/scanner resolution (e.g. 4000x3000,
+        // a 48MB ARGB_8888 bitmap) even though a phone screen only ever shows them at a fraction
+        // of that. Keeping several such bitmaps alive at once (one per cached page) is enough
+        // retained memory to cause GC-driven jank while scrolling, on top of the per-frame cost of
+        // drawing them — so subsample down to a resolution the display can actually use.
+        val sample = maxOf(1, (maxOf(width, height) + MaxImageDimension - 1) / MaxImageDimension)
+        val outWidth = width / sample
+        val outHeight = height / sample
+        if (outWidth <= 0 || outHeight <= 0) return null
+
+        val bitmap = Bitmap.createBitmap(outWidth, outHeight, Bitmap.Config.ARGB_8888)
+        val intPixels = IntArray(outWidth * outHeight)
+        for (oy in 0 until outHeight) {
+            val rowBase = (oy * sample) * width
+            for (ox in 0 until outWidth) {
+                val o = (rowBase + ox * sample) * 4
+                val r = pixels[o].toInt() and 0xFF
+                val g = pixels[o + 1].toInt() and 0xFF
+                val b = pixels[o + 2].toInt() and 0xFF
+                val a = pixels[o + 3].toInt() and 0xFF
+                intPixels[oy * outWidth + ox] = (a shl 24) or (r shl 16) or (g shl 8) or b
+            }
         }
-        bitmap.setPixels(intPixels, 0, width, 0, 0, width, height)
+        bitmap.setPixels(intPixels, 0, outWidth, 0, 0, outWidth, outHeight)
         return bitmap
     }
 
@@ -72,6 +92,8 @@ class PdfDocument private constructor(private var handle: Long) : AutoCloseable 
     }
 
     companion object {
+        private const val MaxImageDimension = 2048
+
         /** Returns `null` if the bytes aren't a PDF this engine can parse at all (corrupt file,
          * unsupported encryption, etc.) rather than throwing, since a bad file on disk is an
          * expected case for a document reader, not a programming error. */

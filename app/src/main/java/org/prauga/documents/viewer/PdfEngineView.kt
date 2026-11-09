@@ -169,12 +169,18 @@ private fun PdfEngineContent(document: PdfDocument, topPadding: Dp, modifier: Mo
             state = listState,
             modifier = Modifier
                 .fillMaxWidth()
-                .graphicsLayer(
-                    scaleX = zoom.scale,
-                    scaleY = zoom.scale,
-                    translationX = zoom.offsetX,
-                    translationY = zoom.offsetY,
-                )
+                // The block form of graphicsLayer defers reading zoom.scale/offsetX/offsetY to
+                // the draw phase instead of composition — the (scaleX, scaleY, ...) parameter
+                // overload reads them eagerly in the composable body, which means every single
+                // pixel of a drag gesture was recomposing (and relaying out) the whole LazyColumn
+                // and every visible page under it. That's what made one-finger pan after
+                // pinch-zoom feel slow and "stuck".
+                .graphicsLayer {
+                    scaleX = zoom.scale
+                    scaleY = zoom.scale
+                    translationX = zoom.offsetX
+                    translationY = zoom.offsetY
+                }
                 .pinchZoomEngine(zoom),
             contentPadding = PaddingValues(
                 top = topPadding + (if (searchActive) SearchBarHeight else PvotSpacing.M),
@@ -362,7 +368,20 @@ private fun PdfPageItem(
 
     LaunchedEffect(pageIndex) {
         if (page == null) {
-            val decoded = withContext(Dispatchers.Default) { document.renderPage(pageIndex) }
+            val decoded = withContext(Dispatchers.Default) {
+                val rendered = document.renderPage(pageIndex)
+                // Canvas draw calls always run on the UI thread, and PdfPage.imageBitmap's first
+                // call per image crosses the JNI boundary and builds a full-resolution Bitmap from
+                // raw pixel bytes — for a scanned page (a single multi-megapixel JPEG) that's
+                // multiple megabytes of work. Doing that lazily on first draw turned "a new page
+                // scrolls into view" into a dropped frame every time; decoding every image here,
+                // off the main thread, means the Canvas only ever blits an already-built Bitmap.
+                rendered.ops.filterIsInstance<PdfDrawOp.DrawImage>()
+                    .map { it.imageIndex }
+                    .distinct()
+                    .forEach { rendered.imageBitmap(it) }
+                rendered
+            }
             pageCache[pageIndex] = decoded
             page = decoded
         }
