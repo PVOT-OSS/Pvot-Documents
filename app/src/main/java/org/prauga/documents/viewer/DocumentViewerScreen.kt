@@ -172,6 +172,12 @@ fun DocumentViewerScreen(
                 selection = pdfSelection,
                 modifier = Modifier.fillMaxSize()
             )
+        } else if (format == ViewerFormat.Spreadsheet) {
+            SpreadsheetView(
+                uri = uri,
+                topPadding = padding.calculateTopPadding(),
+                modifier = Modifier.fillMaxSize()
+            )
         } else if (format == ViewerFormat.Docx) {
             DocxView(
                 uri = uri,
@@ -222,7 +228,7 @@ private fun TextDocumentContent(uri: Uri, format: ViewerFormat, topPadding: Dp) 
         }
 
         is UiState.Success -> if (format == ViewerFormat.Csv) {
-            CsvTable(
+            CsvSheetView(
                 rows = remember(current.data) { parseCsv(current.data) },
                 topPadding = topPadding,
                 modifier = Modifier.fillMaxSize()

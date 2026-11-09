@@ -26,6 +26,8 @@
     <string name="viewer_pdf_share_selection">Share</string>
     <string name="viewer_pdf_search_selection">Search</string>
     <string name="viewer_pdf_select_all">Select all</string>
+    <string name="viewer_sheet_empty">This sheet is empty</string>
+    <string name="viewer_sheet_description">Sheet size in rows and columns: %1$d, %2$d</string>
     <plurals name="viewer_pdf_selection_truncated">
         <item quantity="one">Only the first %1$,d character was included</item>
         <item quantity="other">Only the first %1$,d characters were included</item>

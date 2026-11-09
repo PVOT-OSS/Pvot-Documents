@@ -1,10 +1,7 @@
 package org.prauga.documents.util
 
-/**
- * A format [org.prauga.documents.viewer.DocumentViewerActivity] can actually open. Markdown, HTML,
- * PDF and DOCX come next, each as its own slice once it has a real renderer rather than a guess at
- * one.
- */
+/** A format [org.prauga.documents.viewer.DocumentViewerActivity] can actually open, each with a
+ * real renderer rather than a guess at one. */
 enum class ViewerFormat {
     /** Shown as-is, in the body font. */
     PlainText,
@@ -28,7 +25,10 @@ enum class ViewerFormat {
     Pdf,
 
     /** Parsed from its zip of XML parts into paragraphs and runs, shown as styled text. */
-    Docx
+    Docx,
+
+    /** An Excel (`.xlsx`) or OpenDocument (`.ods`) workbook, shown sheet by sheet as a grid. */
+    Spreadsheet
 }
 
 private val CodeExtensions = setOf(
@@ -49,6 +49,7 @@ fun viewerFormat(name: String, mimeType: String): ViewerFormat? {
         extension == "html" || extension == "htm" -> ViewerFormat.Html
         extension == "pdf" -> ViewerFormat.Pdf
         extension == "docx" -> ViewerFormat.Docx
+        extension == "xlsx" || extension == "xlsm" || extension == "ods" -> ViewerFormat.Spreadsheet
         extension in CodeExtensions -> ViewerFormat.Code
         mimeType == "application/json" -> ViewerFormat.Json
         mimeType == "text/csv" || mimeType == "application/csv" -> ViewerFormat.Csv
@@ -56,6 +57,8 @@ fun viewerFormat(name: String, mimeType: String): ViewerFormat? {
         mimeType == "text/html" -> ViewerFormat.Html
         mimeType == "application/pdf" -> ViewerFormat.Pdf
         mimeType.contains("wordprocessingml") -> ViewerFormat.Docx
+        mimeType.contains("spreadsheetml") || mimeType.equals("application/vnd.ms-excel.sheet.macroEnabled.12", ignoreCase = true) ||
+            mimeType == "application/vnd.oasis.opendocument.spreadsheet" -> ViewerFormat.Spreadsheet
         mimeType.startsWith("text/") -> ViewerFormat.PlainText
         else -> null
     }
