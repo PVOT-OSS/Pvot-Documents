@@ -18,6 +18,7 @@ enum class DocumentKind(private val fixedColor: Color?) {
     Pdf(Color(0xFFE53935)),
     Word(Color(0xFF4285F4)),
     Spreadsheet(Color(0xFF34A853)),
+    Presentation(Color(0xFFD84315)),
     Html(Color(0xFFFB8C00)),
     PlainText(Color(0xFF78909C)),
     Other(null);
@@ -31,6 +32,7 @@ enum class DocumentKind(private val fixedColor: Color?) {
             Pdf -> R.string.document_kind_pdf
             Word -> R.string.document_kind_word
             Spreadsheet -> R.string.document_kind_spreadsheet
+            Presentation -> R.string.document_kind_presentation
             Html -> R.string.document_kind_html
             PlainText -> R.string.document_kind_text
             Other -> R.string.document_kind_other
@@ -44,6 +46,7 @@ fun documentKind(name: String, mimeType: String): DocumentKind =
         "pdf" -> DocumentKind.Pdf
         "doc", "docx", "odt" -> DocumentKind.Word
         "xls", "xlsx", "xlsm", "ods", "csv" -> DocumentKind.Spreadsheet
+        "ppt", "pptx", "odp" -> DocumentKind.Presentation
         "html", "htm" -> DocumentKind.Html
         "txt", "md", "markdown" -> DocumentKind.PlainText
         else -> mimeTypeKind(mimeType)
@@ -56,6 +59,8 @@ private fun mimeTypeKind(mimeType: String): DocumentKind = when {
     mimeType.contains("spreadsheetml") || mimeType == "application/vnd.oasis.opendocument.spreadsheet" ||
         mimeType == "text/csv" ||
         mimeType == "application/csv" -> DocumentKind.Spreadsheet
+    mimeType.contains("presentationml") || mimeType == "application/vnd.ms-powerpoint" ||
+        mimeType == "application/vnd.oasis.opendocument.presentation" -> DocumentKind.Presentation
     mimeType == "text/html" -> DocumentKind.Html
     mimeType.startsWith("text/") -> DocumentKind.PlainText
     else -> DocumentKind.Other
