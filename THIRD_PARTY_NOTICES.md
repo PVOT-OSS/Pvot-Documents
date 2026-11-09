@@ -22,3 +22,9 @@ The Rust PDF engine (`pdf-engine/src/main/rust/`) uses [lopdf](https://github.co
 for low-level PDF object/xref parsing and stream decompression, MIT License. Everything above
 that layer — the content-stream interpreter, font/encoding handling, text extraction and search —
 is our own code; see `CLAUDE.md` for why PdfBox-Android was replaced.
+
+## zune-jpeg
+
+The Rust PDF engine also uses [zune-jpeg](https://github.com/etemesi254/zune-image) to decode
+`DCTDecode` (JPEG) image XObjects — scanned-page PDFs are almost always one full-page JPEG per
+page — MIT License.
