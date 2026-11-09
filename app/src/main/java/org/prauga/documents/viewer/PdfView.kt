@@ -779,7 +779,7 @@ private const val PageIndicatorHideMillis = 1500L
 
 /** The whole document's zoom and pan — pinch scales the entire scrolling document in place, as a
  * PDF reader does, rather than one page inside its own frame. Offsets are in screen pixels. */
-private class PdfZoomState {
+internal class PdfZoomState {
     var scale by mutableFloatStateOf(1f)
     var offsetX by mutableFloatStateOf(0f)
     var offsetY by mutableFloatStateOf(0f)
@@ -791,7 +791,7 @@ private const val MaxZoom = 5f
  * any vertical movement past the edge of the zoomed page scrolls the document instead, so
  * reading on while zoomed doesn't stop at the bottom of the screen. Lifting with speed flings. At
  * 1x a one-finger drag is left alone for the list's own scrolling. */
-private fun Modifier.pinchZoom(
+internal fun Modifier.pinchZoom(
     zoom: PdfZoomState,
     listState: LazyListState,
     scope: CoroutineScope,

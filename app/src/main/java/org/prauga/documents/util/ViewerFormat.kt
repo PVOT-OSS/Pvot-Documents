@@ -31,7 +31,10 @@ enum class ViewerFormat {
     Odt,
 
     /** An Excel (`.xlsx`) or OpenDocument (`.ods`) workbook, shown sheet by sheet as a grid. */
-    Spreadsheet
+    Spreadsheet,
+
+    /** A PowerPoint (`.pptx`) or OpenDocument (`.odp`) presentation, each slide drawn as laid out. */
+    Slides
 }
 
 private val CodeExtensions = setOf(
@@ -53,6 +56,7 @@ fun viewerFormat(name: String, mimeType: String): ViewerFormat? {
         extension == "pdf" -> ViewerFormat.Pdf
         extension == "docx" -> ViewerFormat.Docx
         extension == "odt" -> ViewerFormat.Odt
+        extension == "pptx" || extension == "odp" -> ViewerFormat.Slides
         extension == "xlsx" || extension == "xlsm" || extension == "ods" -> ViewerFormat.Spreadsheet
         extension in CodeExtensions -> ViewerFormat.Code
         mimeType == "application/json" -> ViewerFormat.Json
@@ -62,6 +66,8 @@ fun viewerFormat(name: String, mimeType: String): ViewerFormat? {
         mimeType == "application/pdf" -> ViewerFormat.Pdf
         mimeType.contains("wordprocessingml") -> ViewerFormat.Docx
         mimeType == "application/vnd.oasis.opendocument.text" -> ViewerFormat.Odt
+        mimeType.contains("presentationml.presentation") ||
+            mimeType == "application/vnd.oasis.opendocument.presentation" -> ViewerFormat.Slides
         mimeType.contains("spreadsheetml") || mimeType.equals("application/vnd.ms-excel.sheet.macroEnabled.12", ignoreCase = true) ||
             mimeType == "application/vnd.oasis.opendocument.spreadsheet" -> ViewerFormat.Spreadsheet
         mimeType.startsWith("text/") -> ViewerFormat.PlainText

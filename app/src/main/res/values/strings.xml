@@ -27,6 +27,7 @@
     <string name="viewer_pdf_search_selection">Search</string>
     <string name="viewer_pdf_select_all">Select all</string>
     <string name="viewer_sheet_empty">This sheet is empty</string>
+    <string name="viewer_slide_description">Slide %1$d of %2$d</string>
     <string name="viewer_sheet_description">Sheet size in rows and columns: %1$d, %2$d</string>
     <plurals name="viewer_pdf_selection_truncated">
         <item quantity="one">Only the first %1$,d character was included</item>
@@ -61,6 +62,7 @@
     <string name="document_kind_pdf">PDF</string>
     <string name="document_kind_word">Word</string>
     <string name="document_kind_spreadsheet">Spreadsheet</string>
+    <string name="document_kind_presentation">Slides</string>
     <string name="document_kind_html">HTML</string>
     <string name="document_kind_text">Text</string>
     <string name="document_kind_other">Other</string>
