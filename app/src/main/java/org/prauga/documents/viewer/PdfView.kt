@@ -23,7 +23,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -36,7 +35,6 @@ import androidx.compose.ui.unit.dp
 import com.prauga.pvot.coreui.PvotErrorContent
 import com.prauga.pvot.coreui.PvotLoadingContent
 import com.prauga.pvot.coreui.UiState
-import com.prauga.pvot.designsystem.components.PvotCard
 import com.prauga.pvot.designsystem.theme.PvotSpacing
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -56,6 +54,7 @@ fun PdfView(uri: Uri, topPadding: Dp, modifier: Modifier = Modifier) {
     val density = LocalDensity.current
     var state by remember(uri) { mutableStateOf<UiState<List<Bitmap>>>(UiState.Loading) }
     var retryToken by remember(uri) { mutableIntStateOf(0) }
+    val zoom = remember(uri) { PdfZoomState() }
     val readFailedMessage = stringResource(R.string.viewer_read_failed)
     val widthPx = with(density) { PdfPageWidth.roundToPx() }
 
@@ -85,7 +84,14 @@ fun PdfView(uri: Uri, topPadding: Dp, modifier: Modifier = Modifier) {
         }
 
         is UiState.Success -> LazyColumn(
-            modifier = modifier,
+            modifier = modifier
+                .graphicsLayer(
+                    scaleX = zoom.scale,
+                    scaleY = zoom.scale,
+                    translationX = zoom.offsetX,
+                    translationY = zoom.offsetY
+                )
+                .pinchZoom(zoom),
             contentPadding = PaddingValues(
                 top = topPadding + PvotSpacing.M,
                 start = PvotSpacing.L,
@@ -94,25 +100,12 @@ fun PdfView(uri: Uri, topPadding: Dp, modifier: Modifier = Modifier) {
             )
         ) {
             items(current.data) { page ->
-                PvotCard(modifier = Modifier.fillMaxWidth().padding(bottom = PvotSpacing.M)) {
-                    val zoom = remember(page) { PageZoomState() }
-                    Box(modifier = Modifier.fillMaxWidth().clipToBounds()) {
-                        Image(
-                            bitmap = page.asImageBitmap(),
-                            contentDescription = null,
-                            contentScale = ContentScale.FillWidth,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .graphicsLayer(
-                                    scaleX = zoom.scale,
-                                    scaleY = zoom.scale,
-                                    translationX = zoom.offsetX,
-                                    translationY = zoom.offsetY
-                                )
-                                .pinchZoom(zoom)
-                        )
-                    }
-                }
+                Image(
+                    bitmap = page.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.FillWidth,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = PvotSpacing.S)
+                )
             }
         }
     }
@@ -120,28 +113,29 @@ fun PdfView(uri: Uri, topPadding: Dp, modifier: Modifier = Modifier) {
 
 private val PdfPageWidth = 480.dp
 
-/** A page's zoom level and pan offset, reset whenever the page's own [remember] key changes —
- * each page keeps its own zoom rather than sharing one across the whole scrolling strip. */
-private class PageZoomState {
+/** The whole scrolling PDF's shared zoom level and pan offset — pinch-zoom scales the entire
+ * document in place, the way a normal PDF viewer does, rather than one page inside its own
+ * container. Reset whenever [remember]'s key (the document [Uri]) changes. */
+private class PdfZoomState {
     var scale by mutableFloatStateOf(1f)
     var offsetX by mutableFloatStateOf(0f)
     var offsetY by mutableFloatStateOf(0f)
 }
 
-private const val MaxPageZoom = 5f
+private const val MaxPdfZoom = 5f
 
 /** Two-finger pinch-to-zoom and pan on [zoom], one-finger drags left untouched so the page list
  * keeps scrolling normally. Only consumes pointer events once a second finger is down — a plain
  * scroll never reaches this gesture detector's zoom/pan branch, so there's nothing to arbitrate
  * with the enclosing [androidx.compose.foundation.lazy.LazyColumn]'s own scroll handling. */
-private fun Modifier.pinchZoom(zoom: PageZoomState): Modifier = this.pointerInput(Unit) {
+private fun Modifier.pinchZoom(zoom: PdfZoomState): Modifier = this.pointerInput(Unit) {
     awaitEachGesture {
         do {
             val event = awaitPointerEvent()
             if (event.changes.size >= 2) {
                 val zoomChange = event.calculateZoom()
                 val panChange = event.calculatePan()
-                zoom.scale = (zoom.scale * zoomChange).coerceIn(1f, MaxPageZoom)
+                zoom.scale = (zoom.scale * zoomChange).coerceIn(1f, MaxPdfZoom)
                 if (zoom.scale > 1f) {
                     zoom.offsetX += panChange.x
                     zoom.offsetY += panChange.y

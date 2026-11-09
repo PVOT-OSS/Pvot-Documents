@@ -11,3 +11,5 @@ build/
 .externalNativeBuild
 .cxx
 local.properties
+# Rust build output for :pdf-engine (pdf-engine/src/main/rust/Cargo.toml)
+/pdf-engine/src/main/rust/target/

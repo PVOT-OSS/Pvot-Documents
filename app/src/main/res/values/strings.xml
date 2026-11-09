@@ -14,6 +14,14 @@
     <string name="recent_empty">Documents you open will show up here.</string>
     <string name="recent_filter_all">All</string>
     <string name="viewer_read_failed">Couldn\'t open this document</string>
+    <string name="viewer_pdf_search">Search in document</string>
+    <string name="viewer_pdf_search_placeholder">Search</string>
+    <string name="viewer_pdf_search_clear">Clear search</string>
+    <string name="viewer_pdf_search_previous">Previous match</string>
+    <string name="viewer_pdf_search_next">Next match</string>
+    <string name="viewer_pdf_search_count">%1$d of %2$d</string>
+    <string name="viewer_pdf_search_none">No matches</string>
+    <string name="viewer_pdf_copy_selection">Copy</string>
     <string name="recent_no_filter_results">No %1$s documents in Recent.</string>
     <string name="document_kind_pdf">PDF</string>
     <string name="document_kind_word">Word</string>

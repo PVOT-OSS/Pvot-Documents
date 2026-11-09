@@ -53,7 +53,7 @@ fun DocumentViewerScreen(
         topBar = { PvotTopBar(title = name, onBack = onBack, compact = true) }
     ) { padding ->
         if (format == ViewerFormat.Pdf) {
-            PdfView(
+            PdfEngineView(
                 uri = uri,
                 topPadding = padding.calculateTopPadding(),
                 modifier = Modifier.fillMaxSize()

@@ -29,12 +29,18 @@ if it has to be app-local for now, keep it small and list it under "Open items".
   URI permissions. No storage permission and no `MANAGE_EXTERNAL_STORAGE` for now; "All files
   access" may come later as an option.
 - **Fully free software.** Every dependency must be open source and F-Droid friendly: no Google Play
-  Services, no ML Kit. PDF reading and rendering is PdfBox-Android (Apache-2.0) — it renders
-  in-process, which is why it replaced an earlier attempt with `androidx.pdf`: that went through a
-  sandboxed system service for every page, and the per-page binder round-trip stuttered visibly on
-  real-finger scroll (confirmed with on-device Perfetto traces: clean frame timing throughout, so
-  the stutter was the IPC, not rendering). PdfBox-Android also covers writing PDFs later. Planned:
-  OpenCV and Tesseract for the scanner. AGPL libraries (MuPDF) are out.
+  Services, no ML Kit. AGPL libraries (MuPDF) are out. Planned: OpenCV and Tesseract for the
+  scanner.
+- **PDF engine history.** `androidx.pdf` went through a sandboxed system service for every page,
+  and the per-page binder round-trip stuttered visibly on real-finger scroll (confirmed with
+  on-device Perfetto traces: clean frame timing throughout, so the stutter was the IPC, not
+  rendering) — replaced with PdfBox-Android (Apache-2.0, in-process rendering). PdfBox-Android
+  fixed the stutter but had no text selection and its own rendering-fidelity and memory problems,
+  so it's being replaced in turn by `:pdf-engine`, a from-scratch Rust PDF engine (parsing on top
+  of `lopdf`, our own content-stream interpreter, font/encoding/CMap handling, and search), JNI-
+  bridged into the app and drawn as vector primitives straight onto a Compose `Canvas` — no
+  sandboxed service, no whole-document up-front rasterization. PdfBox-Android stays in the
+  dependency tree until the new engine is verified on-device and can fully replace it.
 - **No network.** The app does not ask for `INTERNET`. Any AI feature is on-device and comes last.
 - **Office formats are view-only** in v1, through small parsers of our own rather than a bundled
   office suite.
@@ -82,6 +88,8 @@ app/src/main/java/org/prauga/documents/
   AppPreferences.kt       SharedPreferences-backed settings, observable from Compose
   ui/AppShell.kt          PvotScreenScaffold: top bar per tab, PvotNavBar, four tabs
   ui/screens/             Recent, Tools, Manage (empty states for now), Settings
+  viewer/PdfEngineView.kt PDF viewer on top of :pdf-engine (replacing viewer/PdfView.kt)
+pdf-engine/               Rust PDF engine + its JNI/Kotlin bridge (own Gradle module, see below)
 ```
 
 ## Toolchain
@@ -89,6 +97,12 @@ app/src/main/java/org/prauga/documents/
 AGP 9.5.0, Kotlin 2.4.21, Java 21, Gradle 9.6.1, compile SDK 37.1, target SDK 36, min SDK 27
 (PvotLib's floor). CI is `PVOT-OSS/workflows` `android-build.yml` with `java-version: '21'` and runs
 `assembleDebug assembleRelease lint`.
+
+`:pdf-engine` additionally needs a Rust toolchain (`rustup`, stable) with the Android targets
+(`aarch64-linux-android`, `armv7-linux-androideabi`, `x86_64-linux-android`) and `cargo-ndk`
+installed, plus `ANDROID_NDK_HOME` set (or discoverable under `$ANDROID_HOME/ndk`). Gradle's
+`preBuild` for that module shells out to `cargo ndk` itself — see
+`pdf-engine/build.gradle.kts`.
 
 ## Commands
 
