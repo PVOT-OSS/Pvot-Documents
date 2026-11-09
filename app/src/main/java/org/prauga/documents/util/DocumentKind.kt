@@ -42,7 +42,7 @@ enum class DocumentKind(private val fixedColor: Color?) {
 fun documentKind(name: String, mimeType: String): DocumentKind =
     when (name.substringAfterLast('.', missingDelimiterValue = "").lowercase()) {
         "pdf" -> DocumentKind.Pdf
-        "doc", "docx" -> DocumentKind.Word
+        "doc", "docx", "odt" -> DocumentKind.Word
         "xls", "xlsx", "xlsm", "ods", "csv" -> DocumentKind.Spreadsheet
         "html", "htm" -> DocumentKind.Html
         "txt", "md", "markdown" -> DocumentKind.PlainText
@@ -51,7 +51,8 @@ fun documentKind(name: String, mimeType: String): DocumentKind =
 
 private fun mimeTypeKind(mimeType: String): DocumentKind = when {
     mimeType == "application/pdf" -> DocumentKind.Pdf
-    mimeType.contains("wordprocessingml") || mimeType == "application/msword" -> DocumentKind.Word
+    mimeType.contains("wordprocessingml") || mimeType == "application/msword" ||
+        mimeType == "application/vnd.oasis.opendocument.text" -> DocumentKind.Word
     mimeType.contains("spreadsheetml") || mimeType == "application/vnd.oasis.opendocument.spreadsheet" ||
         mimeType == "text/csv" ||
         mimeType == "application/csv" -> DocumentKind.Spreadsheet

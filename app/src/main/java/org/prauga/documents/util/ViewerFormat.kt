@@ -24,8 +24,11 @@ enum class ViewerFormat {
     /** Rasterized page by page through the platform's own renderer. */
     Pdf,
 
-    /** Parsed from its zip of XML parts into paragraphs and runs, shown as styled text. */
+    /** A Word document, parsed into paragraphs, lists, tables and pictures, shown as flowing text. */
     Docx,
+
+    /** An OpenDocument text file, shown the same way as [Docx]. */
+    Odt,
 
     /** An Excel (`.xlsx`) or OpenDocument (`.ods`) workbook, shown sheet by sheet as a grid. */
     Spreadsheet
@@ -49,6 +52,7 @@ fun viewerFormat(name: String, mimeType: String): ViewerFormat? {
         extension == "html" || extension == "htm" -> ViewerFormat.Html
         extension == "pdf" -> ViewerFormat.Pdf
         extension == "docx" -> ViewerFormat.Docx
+        extension == "odt" -> ViewerFormat.Odt
         extension == "xlsx" || extension == "xlsm" || extension == "ods" -> ViewerFormat.Spreadsheet
         extension in CodeExtensions -> ViewerFormat.Code
         mimeType == "application/json" -> ViewerFormat.Json
@@ -57,6 +61,7 @@ fun viewerFormat(name: String, mimeType: String): ViewerFormat? {
         mimeType == "text/html" -> ViewerFormat.Html
         mimeType == "application/pdf" -> ViewerFormat.Pdf
         mimeType.contains("wordprocessingml") -> ViewerFormat.Docx
+        mimeType == "application/vnd.oasis.opendocument.text" -> ViewerFormat.Odt
         mimeType.contains("spreadsheetml") || mimeType.equals("application/vnd.ms-excel.sheet.macroEnabled.12", ignoreCase = true) ||
             mimeType == "application/vnd.oasis.opendocument.spreadsheet" -> ViewerFormat.Spreadsheet
         mimeType.startsWith("text/") -> ViewerFormat.PlainText
