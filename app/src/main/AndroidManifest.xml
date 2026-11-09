@@ -46,9 +46,12 @@
         </activity>
 
         <!-- Opens one document, chosen from Recent or Manage; see DocumentViewerActivity.start(). -->
+        <!-- adjustResize: the PDF search bar rides on the keyboard through its insets; the
+             default pan would shove the whole viewer, top bar included, up off the screen. -->
         <activity
             android:name=".viewer.DocumentViewerActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
 
         <!-- Shares the app's own copies of opened documents (see res/xml/file_paths.xml) without
              exposing the rest of app storage. -->

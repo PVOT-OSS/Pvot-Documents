@@ -69,6 +69,12 @@ class DocumentsRepository(private val context: Context) {
         )
     }
 
+    /** Whether [uri]'s content can actually be opened for reading right now. */
+    suspend fun canRead(uri: Uri): Boolean = withContext(Dispatchers.IO) {
+        runCatching { context.contentResolver.openInputStream(uri)?.use { true } ?: false }
+            .getOrDefault(false)
+    }
+
     /**
      * Copies [uri] into the app's own storage, under `filesDir/opened/`, so it survives after a
      * transient grant from the sending app expires. Returns a [DocumentEntry] pointing at the

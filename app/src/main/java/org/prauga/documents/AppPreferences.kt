@@ -15,6 +15,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.prauga.documents.models.DocumentEntry
 import org.prauga.documents.models.TrashedDocument
+import org.prauga.documents.util.isOwnFile
 import java.io.File
 
 /** The app's settings, kept in SharedPreferences and observable from Compose. */
@@ -111,8 +112,21 @@ class AppPreferences(context: Context) {
      * autosaved entry points at Documents' own copy; a not-saved one keeps the original content
      * URI, which may stop resolving once the sending app's grant expires.
      */
-    var recentDocuments by mutableStateOf(decodeRecentDocuments(prefs.getString(KEY_RECENT, null)))
+    var recentDocuments by mutableStateOf(
+        // Entries an older build recorded for a path it could never read (a `file://` URI from
+        // another app's "Open with", outside Documents' own storage) are dropped on load.
+        decodeRecentDocuments(prefs.getString(KEY_RECENT, null)).filter {
+            it.uri.scheme != "file" || isOwnFile(context, File(it.uri.path.orEmpty()))
+        }
+    )
         private set
+
+    /** Drops [entry] from [recentDocuments], such as one whose document no longer opens. */
+    fun removeRecentDocument(entry: DocumentEntry) {
+        val updated = recentDocuments.filterNot { it.uri == entry.uri }
+        prefs.edit { putString(KEY_RECENT, encodeRecentDocuments(updated)) }
+        recentDocuments = updated
+    }
 
     /**
      * Adds [entry], replacing any existing entry for the same document. Re-opening an unsaved

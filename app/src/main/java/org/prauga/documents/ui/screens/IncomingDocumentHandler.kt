@@ -15,14 +15,16 @@ import com.prauga.pvot.designsystem.components.PvotDialogActionStyle
 import org.prauga.documents.AppPreferences
 import org.prauga.documents.R
 import org.prauga.documents.data.DocumentsRepository
-import org.prauga.documents.models.DocumentEntry
+import org.prauga.documents.util.openDocument
+import org.prauga.documents.util.viewerFormat
+import org.prauga.documents.viewer.DocumentViewerActivity
 
 /**
  * Handles a document the app was opened or shared with, from [MainActivity][org.prauga.documents.MainActivity].
  * The first time, asks once whether to copy it into Documents' own storage; after that the choice
  * is remembered (and changeable from Settings). Either way the document ends up in
- * [AppPreferences.recentDocuments], so it shows up on the Recent tab. Opening it is phase 2; for
- * now this only receives and records it.
+ * [AppPreferences.recentDocuments], so it shows up on the Recent tab, and opens in the viewer. A
+ * document the app can't read isn't recorded.
  */
 @Composable
 fun IncomingDocumentHandler(uri: Uri, preferences: AppPreferences, onHandled: () -> Unit) {
@@ -50,15 +52,17 @@ fun IncomingDocumentHandler(uri: Uri, preferences: AppPreferences, onHandled: ()
 
     LaunchedEffect(uri, autosave) {
         val entry = (if (autosave) repository.copyToAppStorage(uri, resolvedName) else null)
-            ?: repository.documentInfo(uri)
-            ?: DocumentEntry(
-                uri = uri,
-                name = resolvedName,
-                mimeType = "application/octet-stream",
-                sizeBytes = 0,
-                lastModified = System.currentTimeMillis()
-            )
-        preferences.addRecentDocument(entry)
+            ?: repository.documentInfo(uri)?.takeIf { repository.canRead(uri) }
+        if (entry != null) {
+            openDocument(context, preferences, entry)
+        } else {
+            // Nothing to record: a path Documents has no permission for, or a grant that has
+            // already expired. The viewer still opens, to say it couldn't read the document,
+            // rather than the app doing nothing at all.
+            viewerFormat(resolvedName, context.contentResolver.getType(uri).orEmpty())?.let { format ->
+                DocumentViewerActivity.start(context, uri, resolvedName, format)
+            }
+        }
         onHandled()
     }
 }

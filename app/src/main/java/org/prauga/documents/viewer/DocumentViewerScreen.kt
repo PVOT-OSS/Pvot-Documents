@@ -1,6 +1,16 @@
 package org.prauga.documents.viewer
 
 import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.ui.res.painterResource
+import com.prauga.pvot.designsystem.motion.PvotDurations
+import com.prauga.pvot.designsystem.motion.PvotMotion
+import com.prauga.pvot.designsystem.navigation.PvotTopBarAction
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -49,13 +59,36 @@ fun DocumentViewerScreen(
     format: ViewerFormat,
     onBack: () -> Unit
 ) {
+    val pdfSearch = remember { PdfSearchState() }
     PvotScreenScaffold(
-        topBar = { PvotTopBar(title = name, onBack = onBack, compact = true) }
+        topBar = {
+            PvotTopBar(title = name, onBack = onBack, compact = true) {
+                if (pdfSearch.available && !pdfSearch.active) {
+                    PvotTopBarAction(
+                        icon = painterResource(R.drawable.ic_search),
+                        contentDescription = stringResource(R.string.viewer_pdf_search),
+                        onClick = pdfSearch::open
+                    )
+                }
+            }
+        },
+        bottomBar = {
+            AnimatedVisibility(
+                visible = pdfSearch.active,
+                enter = fadeIn(tween(PvotDurations.Medium, easing = PvotMotion.Settle)) +
+                    slideInVertically(tween(PvotDurations.Medium, easing = PvotMotion.Settle)) { it / 2 },
+                exit = fadeOut(tween(PvotDurations.Short)) +
+                    slideOutVertically(tween(PvotDurations.Short)) { it / 2 }
+            ) {
+                PdfSearchBar(pdfSearch)
+            }
+        }
     ) { padding ->
         if (format == ViewerFormat.Pdf) {
             PdfView(
                 uri = uri,
                 topPadding = padding.calculateTopPadding(),
+                search = pdfSearch,
                 modifier = Modifier.fillMaxSize()
             )
         } else if (format == ViewerFormat.Docx) {

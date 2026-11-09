@@ -32,10 +32,9 @@ import org.prauga.documents.R
 import org.prauga.documents.util.DocumentKind
 import org.prauga.documents.util.documentKind
 import org.prauga.documents.util.formatFileSize
-import org.prauga.documents.util.readableUri
+import org.prauga.documents.util.OpenResult
+import org.prauga.documents.util.openDocument
 import org.prauga.documents.util.shareDocument
-import org.prauga.documents.util.viewerFormat
-import org.prauga.documents.viewer.DocumentViewerActivity
 
 /**
  * Documents the app was opened or shared with, most recent first, filterable by type — see
@@ -58,6 +57,7 @@ fun RecentScreen(
 
     val context = LocalContext.current
     val openUnsupportedMessage = stringResource(R.string.manage_open_unsupported)
+    val unavailableMessage = stringResource(R.string.recent_unavailable)
 
     // Only the kinds actually present get a chip, so "All" is never alone on the row.
     val kindsPresent = remember(documents) {
@@ -137,16 +137,13 @@ fun RecentScreen(
                                     )
                                 },
                                 onClick = {
-                                    val format = viewerFormat(document.name, document.mimeType)
-                                    if (format != null) {
-                                        DocumentViewerActivity.start(
-                                            context,
-                                            readableUri(context, document),
-                                            document.name,
-                                            format
-                                        )
-                                    } else {
-                                        onUnsupported(openUnsupportedMessage)
+                                    when (openDocument(context, preferences, document)) {
+                                        OpenResult.Opened -> Unit
+                                        OpenResult.Unsupported -> onUnsupported(openUnsupportedMessage)
+                                        OpenResult.Unreadable -> {
+                                            preferences.removeRecentDocument(document)
+                                            onUnsupported(unavailableMessage)
+                                        }
                                     }
                                 }
                             )

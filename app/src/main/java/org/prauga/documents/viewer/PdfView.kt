@@ -1,5 +1,8 @@
 package org.prauga.documents.viewer
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.gestures.animateScrollBy
 import android.content.ClipData
 import android.net.Uri
 import androidx.compose.animation.core.FloatExponentialDecaySpec
@@ -16,7 +19,6 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
@@ -31,14 +33,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,7 +61,6 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.toClipEntry
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -70,8 +69,6 @@ import androidx.compose.ui.unit.dp
 import com.prauga.pvot.coreui.PvotErrorContent
 import com.prauga.pvot.coreui.PvotLoadingContent
 import com.prauga.pvot.coreui.UiState
-import com.prauga.pvot.designsystem.components.button.PvotIconButton
-import com.prauga.pvot.designsystem.components.textfield.PvotTextField
 import com.prauga.pvot.designsystem.theme.PvotSpacing
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -89,7 +86,7 @@ import kotlin.math.roundToInt
  * sharp. In-process matters: androidx.pdf is Pdfium too, but behind a system service whose
  * per-page binder round-trip stuttered visibly on scroll. See `CLAUDE.md`. */
 @Composable
-fun PdfView(uri: Uri, topPadding: Dp, modifier: Modifier = Modifier) {
+fun PdfView(uri: Uri, topPadding: Dp, search: PdfSearchState, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var state by remember(uri) { mutableStateOf<UiState<PdfiumDocument>>(UiState.Loading) }
     var retryToken by remember(uri) { mutableIntStateOf(0) }
@@ -120,7 +117,7 @@ fun PdfView(uri: Uri, topPadding: Dp, modifier: Modifier = Modifier) {
                 onRetry = { retryToken++ },
             )
         }
-        is UiState.Success -> PdfContent(document = current.data, topPadding = topPadding, modifier = modifier)
+        is UiState.Success -> PdfContent(document = current.data, topPadding = topPadding, search = search, modifier = modifier)
     }
 }
 
@@ -132,7 +129,7 @@ private data class PageSelection(val anchor: Int, val focus: Int) {
 }
 
 @Composable
-private fun PdfContent(document: PdfiumDocument, topPadding: Dp, modifier: Modifier) {
+private fun PdfContent(document: PdfiumDocument, topPadding: Dp, search: PdfSearchState, modifier: Modifier) {
     val zoom = remember(document) { PdfZoomState() }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -140,10 +137,8 @@ private fun PdfContent(document: PdfiumDocument, topPadding: Dp, modifier: Modif
     val density = LocalDensity.current
     val clipLabel = stringResource(R.string.viewer_pdf_clip_label)
 
-    var searchActive by remember(document) { mutableStateOf(false) }
-    var searchQuery by remember(document) { mutableStateOf("") }
     var matches by remember(document) { mutableStateOf<List<SearchMatch>>(emptyList()) }
-    var currentMatch by remember(document) { mutableIntStateOf(0) }
+    val currentMatch = search.currentMatch
     val matchesByPage = remember(matches) { matches.withIndex().groupBy { it.value.pageIndex } }
 
     var selectionPage by remember(document) { mutableIntStateOf(-1) }
@@ -165,26 +160,69 @@ private fun PdfContent(document: PdfiumDocument, topPadding: Dp, modifier: Modif
         }
     }
 
-    val pageHorizontalPadding = with(density) { (PvotSpacing.L * 2).toPx() }
+    val pageSidePadding = with(density) { PvotSpacing.L.toPx() }
+    var scrollJob by remember { mutableStateOf<Job?>(null) }
+
+    /** Brings [match] to a third of the way down the visible area (below the search bar), at the
+     * current zoom: the list scrolls it into place vertically, and when zoomed in the view pans
+     * sideways so it isn't left off screen. Measured from the live layout, so the keyboard or the
+     * search bar changing the viewport doesn't throw it off. */
     fun scrollToMatch(match: SearchMatch) {
-        val info = listState.layoutInfo
-        val pageWidth = info.viewportSize.width - pageHorizontalPadding
-        val pageHeight = pageWidth / document.pageAspects[match.pageIndex]
-        val offset = (match.rects.first().top * pageHeight - info.viewportSize.height / 4f)
-            .roundToInt().coerceAtLeast(0)
-        scope.launch { listState.animateScrollToItem(match.pageIndex, offset) }
+        scrollJob?.cancel()
+        scrollJob = scope.launch {
+            if (listState.layoutInfo.visibleItemsInfo.none { it.index == match.pageIndex }) {
+                listState.scrollToItem(match.pageIndex)
+            }
+            val info = listState.layoutInfo
+            val item = info.visibleItemsInfo.firstOrNull { it.index == match.pageIndex } ?: return@launch
+            val rect = match.rects.first()
+            val width = info.viewportSize.width.toFloat()
+            val height = info.viewportSize.height.toFloat()
+            val pageWidth = width - pageSidePadding * 2
+            // List coordinates: from the top-left of the list's own (unzoomed) box.
+            val matchY = item.offset - info.viewportStartOffset + (rect.top + rect.bottom) / 2f * item.size
+            val matchX = pageSidePadding + (rect.left + rect.right) / 2f * pageWidth
+            // Screen = (list - centre) * scale + centre + offset; graphicsLayer zooms about the centre.
+            val s = zoom.scale
+            val visibleTop = info.beforeContentPadding.toFloat()
+            // The search bar, riding on the keyboard, floats over the bottom of the list.
+            val visibleBottom = (height - search.barHeightPx).coerceAtLeast(visibleTop + 1f)
+            val targetY = visibleTop + (visibleBottom - visibleTop) / 3f
+            if (s > 1f) {
+                val maxX = width * (s - 1f) / 2f
+                zoom.offsetX = (-(matchX - width / 2f) * s).coerceIn(-maxX, maxX)
+            }
+            val delta = matchY - height / 2f - (targetY - height / 2f - zoom.offsetY) / s
+            listState.animateScrollBy(delta)
+        }
     }
 
-    LaunchedEffect(searchQuery, document) {
-        if (searchQuery.isBlank()) {
+    LaunchedEffect(search.query, document) {
+        val query = search.query
+        if (query.isBlank()) {
             matches = emptyList()
+            search.matchCount = 0
             return@LaunchedEffect
         }
         delay(SearchDebounceMillis)
-        val found = document.search(searchQuery)
+        val found = document.search(query)
         matches = found
-        currentMatch = 0
+        search.matchCount = found.size
+        search.currentMatch = 0
         found.firstOrNull()?.let(::scrollToMatch)
+    }
+    DisposableEffect(search, document) {
+        search.available = true
+        search.step = { delta ->
+            if (matches.isNotEmpty()) {
+                search.currentMatch = Math.floorMod(search.currentMatch + delta, matches.size)
+                scrollToMatch(matches[search.currentMatch])
+            }
+        }
+        onDispose {
+            search.available = false
+            search.step = {}
+        }
     }
 
     Box(modifier = modifier) {
@@ -206,10 +244,11 @@ private fun PdfContent(document: PdfiumDocument, topPadding: Dp, modifier: Modif
                     translationY = zoom.offsetY
                 },
             contentPadding = PaddingValues(
-                top = topPadding + (if (searchActive) SearchBarHeight else PvotSpacing.M),
+                top = topPadding + PvotSpacing.M,
                 start = PvotSpacing.L,
                 end = PvotSpacing.L,
-                bottom = PvotSpacing.M,
+                // Room to scroll the last page clear of the search bar.
+                bottom = if (search.active) SearchBarClearance else PvotSpacing.M,
             ),
         ) {
             items(count = document.pageCount, key = { it }) { index ->
@@ -234,106 +273,12 @@ private fun PdfContent(document: PdfiumDocument, topPadding: Dp, modifier: Modif
                 )
             }
         }
-
-        if (searchActive) {
-            PdfSearchBar(
-                query = searchQuery,
-                onQueryChange = { searchQuery = it },
-                matchCount = matches.size,
-                currentMatch = currentMatch,
-                onPrevious = {
-                    if (matches.isNotEmpty()) {
-                        currentMatch = (currentMatch - 1 + matches.size) % matches.size
-                        scrollToMatch(matches[currentMatch])
-                    }
-                },
-                onNext = {
-                    if (matches.isNotEmpty()) {
-                        currentMatch = (currentMatch + 1) % matches.size
-                        scrollToMatch(matches[currentMatch])
-                    }
-                },
-                onClose = {
-                    searchActive = false
-                    searchQuery = ""
-                    matches = emptyList()
-                },
-                topPadding = topPadding,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        } else {
-            PvotIconButton(
-                icon = painterResource(R.drawable.ic_search),
-                contentDescription = stringResource(R.string.viewer_pdf_search),
-                onClick = { searchActive = true },
-                modifier = Modifier
-                    .padding(top = topPadding + PvotSpacing.S, end = PvotSpacing.L)
-                    .align(Alignment.TopEnd),
-            )
-        }
     }
 }
 
-private val SearchBarHeight = 64.dp
+private val SearchBarClearance = 96.dp
 private const val SearchDebounceMillis = 250L
 private const val HiResSettleMillis = 150L
-
-@Composable
-private fun PdfSearchBar(
-    query: String,
-    onQueryChange: (String) -> Unit,
-    matchCount: Int,
-    currentMatch: Int,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
-    onClose: () -> Unit,
-    topPadding: Dp,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .padding(top = topPadding + PvotSpacing.S, start = PvotSpacing.L, end = PvotSpacing.L)
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.95f), MaterialTheme.shapes.large),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        PvotTextField(
-            value = query,
-            onValueChange = onQueryChange,
-            modifier = Modifier.weight(1f).padding(horizontal = PvotSpacing.S),
-            placeholder = stringResource(R.string.viewer_pdf_search_placeholder),
-            singleLine = true,
-        )
-        if (query.isNotBlank()) {
-            Text(
-                text = if (matchCount > 0) {
-                    stringResource(R.string.viewer_pdf_search_count, currentMatch + 1, matchCount)
-                } else {
-                    stringResource(R.string.viewer_pdf_search_none)
-                },
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = PvotSpacing.XS),
-            )
-        }
-        PvotIconButton(
-            icon = painterResource(R.drawable.ic_chevron_up),
-            contentDescription = stringResource(R.string.viewer_pdf_search_previous),
-            onClick = onPrevious,
-            size = 36.dp,
-        )
-        PvotIconButton(
-            icon = painterResource(R.drawable.ic_chevron_down),
-            contentDescription = stringResource(R.string.viewer_pdf_search_next),
-            onClick = onNext,
-            size = 36.dp,
-        )
-        PvotIconButton(
-            icon = painterResource(R.drawable.ic_x),
-            contentDescription = stringResource(R.string.viewer_pdf_search_clear),
-            onClick = onClose,
-            size = 36.dp,
-        )
-    }
-}
 
 /** The whole document's zoom and pan — pinch scales the entire scrolling document in place, as a
  * PDF reader does, rather than one page inside its own frame. Offsets are in screen pixels. */
@@ -503,12 +448,14 @@ private fun PdfPageItem(
 
     val highlightColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.4f)
     val currentHighlightColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
-    val selectionColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+    val selectionColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
     val handleColor = MaterialTheme.colorScheme.primary
     // The gesture coroutines below outlive recompositions, so they read these through State
     // rather than capturing whatever value was current when they started.
     val currentText = rememberUpdatedState(text)
     val currentSelection = rememberUpdatedState(selection)
+    // The word a long press landed on, which a drag from that press extends from.
+    var pressedWord by remember { mutableStateOf(IntRange.EMPTY) }
 
     Box(modifier = Modifier.fillMaxWidth().padding(bottom = PvotSpacing.S)) {
         Box(
@@ -522,14 +469,23 @@ private fun PdfPageItem(
                 .pointerInput(index) {
                     detectDragGesturesAfterLongPress(
                         onDragStart = { position ->
-                            currentText.value?.charNearest(position, size)?.let {
-                                onSelectionChange(PageSelection(it, it))
+                            val pageText = currentText.value ?: return@detectDragGesturesAfterLongPress
+                            pageText.charNearest(position, size, skipWhitespace = true)?.let {
+                                val word = pageText.wordAround(it)
+                                pressedWord = word
+                                onSelectionChange(PageSelection(word.first, word.last))
                             }
                         },
                         onDrag = { change, _ ->
-                            val current = currentSelection.value ?: return@detectDragGesturesAfterLongPress
+                            if (currentSelection.value == null) return@detectDragGesturesAfterLongPress
                             currentText.value?.charNearest(change.position, size)?.let {
-                                onSelectionChange(current.copy(focus = it))
+                                // Dragging back past the pressed word keeps all of that word, by
+                                // anchoring on its far end.
+                                val word = pressedWord
+                                onSelectionChange(
+                                    if (it < word.first) PageSelection(word.last, it)
+                                    else PageSelection(word.first, maxOf(it, word.last))
+                                )
                             }
                         },
                     )
@@ -587,12 +543,13 @@ private fun PageRect.size(size: Size) = Size((right - left) * size.width, (botto
 /** The character whose box is closest to [position] (page-local pixels). Distance to a box is
  * zero inside it, and vertical distance counts double so a touch between two lines picks the
  * line the finger is actually on rather than the nearest letter on the line above. */
-private fun PageText.charNearest(position: Offset, size: IntSize): Int? {
+private fun PageText.charNearest(position: Offset, size: IntSize, skipWhitespace: Boolean = false): Int? {
     if (size.width <= 0) return null
     var best: Int? = null
     var bestDistance = Float.MAX_VALUE
     boxes.forEachIndexed { i, box ->
         if (box == null) return@forEachIndexed
+        if (skipWhitespace && text.getOrNull(i)?.isWhitespace() != false) return@forEachIndexed
         val x = position.x / size.width
         val y = position.y / size.height
         val dx = (if (x < box.left) box.left - x else if (x > box.right) x - box.right else 0f) * size.width
@@ -604,6 +561,18 @@ private fun PageText.charNearest(position: Offset, size: IntSize): Int? {
         }
     }
     return best
+}
+
+/** The word around character [index] — the run of letters and digits it belongs to — so a long
+ * press selects a whole word, as in other readers. Punctuation on its own is selected alone. */
+private fun PageText.wordAround(index: Int): IntRange {
+    fun isWordChar(i: Int) = text.getOrNull(i)?.isLetterOrDigit() == true
+    if (!isWordChar(index)) return index..index
+    var first = index
+    var last = index
+    while (isWordChar(first - 1)) first--
+    while (isWordChar(last + 1)) last++
+    return first..last
 }
 
 private fun PageText.boxAtOrAfter(index: Int): PageRect? =

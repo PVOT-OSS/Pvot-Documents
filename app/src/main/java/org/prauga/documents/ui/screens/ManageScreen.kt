@@ -65,12 +65,10 @@ import org.prauga.documents.models.TrashedDocument
 import org.prauga.documents.util.DocumentSort
 import org.prauga.documents.util.documentKind
 import org.prauga.documents.util.formatFileSize
-import org.prauga.documents.util.readableUri
+import org.prauga.documents.util.OpenResult
 import org.prauga.documents.util.shareDocument
 import org.prauga.documents.util.shareDocuments
 import org.prauga.documents.util.sortedByDocument
-import org.prauga.documents.util.viewerFormat
-import org.prauga.documents.viewer.DocumentViewerActivity
 
 /**
  * Folders the user added, and the documents found directly inside them. Tapping one opens it if
@@ -99,6 +97,7 @@ fun ManageScreen(
     var showNewSheet by remember { mutableStateOf(false) }
     var creatingType by remember { mutableStateOf<NewFileType?>(null) }
     val openUnsupportedMessage = stringResource(R.string.manage_open_unsupported)
+    val readFailedMessage = stringResource(R.string.viewer_read_failed)
     val movedToTrashMessage = stringResource(R.string.manage_moved_to_trash)
     val deleteFailedMessage = stringResource(R.string.manage_delete_failed)
     val renameFailedMessage = stringResource(R.string.manage_rename_failed)
@@ -107,11 +106,10 @@ fun ManageScreen(
     val createFailedMessage = stringResource(R.string.manage_new_create_failed)
 
     fun openDocument(document: DocumentEntry) {
-        val format = viewerFormat(document.name, document.mimeType)
-        if (format != null) {
-            DocumentViewerActivity.start(context, readableUri(context, document), document.name, format)
-        } else {
-            onUnsupported(openUnsupportedMessage)
+        when (org.prauga.documents.util.openDocument(context, preferences, document)) {
+            OpenResult.Opened -> Unit
+            OpenResult.Unsupported -> onUnsupported(openUnsupportedMessage)
+            OpenResult.Unreadable -> onUnsupported(readFailedMessage)
         }
     }
 
