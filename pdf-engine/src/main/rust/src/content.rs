@@ -628,8 +628,9 @@ impl<'a> Interp<'a> {
     }
 
     /// Applies any filters ahead of a `DCTDecode` in the chain (some generators re-compress an
-    /// already-JPEG stream with FlateDecode) and returns the resulting raw JPEG bytes, ready for
-    /// `zune_jpeg`. Filters are applied in the order they're listed, per spec.
+    /// already-JPEG stream with FlateDecode, or ASCII85-armor it for safe embedding in a
+    /// text-based PDF producer) and returns the resulting raw JPEG bytes, ready for `zune_jpeg`.
+    /// Filters are applied in the order they're listed, per spec.
     fn raw_filtered_bytes_before_dct(&self, stream: &lopdf::Stream) -> Option<Vec<u8>> {
         use std::io::Read;
         let filters = stream.filters().ok()?;
@@ -641,6 +642,7 @@ impl<'a> Interp<'a> {
                     flate2::read::ZlibDecoder::new(&data[..]).read_to_end(&mut out).ok()?;
                     data = out;
                 }
+                "ASCII85Decode" => data = ascii85_decode(&data)?,
                 "DCTDecode" => return Some(data),
                 _ => return None,
             }
@@ -662,7 +664,8 @@ impl<'a> Interp<'a> {
                     flate2::read::ZlibDecoder::new(&data[..]).read_to_end(&mut out).ok()?;
                     out
                 }
-                _ => return None, // LZW/ASCII85/RunLength images are a follow-up.
+                "ASCII85Decode" => ascii85_decode(&data)?,
+                _ => return None, // LZW/RunLength images are a follow-up.
             };
         }
         let params = stream
@@ -695,6 +698,47 @@ impl<'a> Interp<'a> {
 
 fn num(o: &LObject) -> f32 {
     o.as_float().unwrap_or_else(|_| o.as_i64().unwrap_or(0) as f32)
+}
+
+/// Decodes an `ASCII85Decode` stream (5 printable chars -> 4 bytes, base 85, with `z` as
+/// shorthand for 4 zero bytes and an optional trailing `~>`). Some PDF producers wrap an
+/// already-compressed/JPEG stream in this just to keep it text-safe for their own pipeline.
+pub fn ascii85_decode(input: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(input.len() * 4 / 5);
+    let mut group = [0u8; 5];
+    let mut group_len = 0usize;
+    for &byte in input {
+        if byte == b'~' {
+            break;
+        }
+        if byte.is_ascii_whitespace() {
+            continue;
+        }
+        if byte == b'z' && group_len == 0 {
+            out.extend_from_slice(&[0, 0, 0, 0]);
+            continue;
+        }
+        if !(b'!'..=b'u').contains(&byte) {
+            return None;
+        }
+        group[group_len] = byte - b'!';
+        group_len += 1;
+        if group_len == 5 {
+            let value = group.iter().fold(0u32, |acc, &d| acc.wrapping_mul(85).wrapping_add(d as u32));
+            out.extend_from_slice(&value.to_be_bytes());
+            group_len = 0;
+        }
+    }
+    if group_len > 0 {
+        // A short final group is padded with 'u' (84, the max digit) before decoding, then only
+        // the first (group_len - 1) of the 4 output bytes are kept.
+        for slot in group.iter_mut().skip(group_len) {
+            *slot = 84;
+        }
+        let value = group.iter().fold(0u32, |acc, &d| acc.wrapping_mul(85).wrapping_add(d as u32));
+        out.extend_from_slice(&value.to_be_bytes()[..group_len - 1]);
+    }
+    Some(out)
 }
 
 fn filter_contains(f: &LObject, name: &[u8]) -> bool {

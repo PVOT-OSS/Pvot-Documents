@@ -73,10 +73,18 @@ impl PdfDoc {
             .and_then(|(_, o)| o.as_dict().ok().cloned())
             .unwrap_or_default();
 
-        let content = self
-            .doc
-            .get_page_content(page_id)
-            .map_err(|e| e.to_string())?;
+        // Not `self.doc.get_page_content`: on any decompression failure it silently falls back
+        // to the stream's still-encoded raw bytes rather than erroring — and its decoder only
+        // knows FlateDecode/LZWDecode, not ASCII85Decode. A still-armored content stream looks
+        // enough like printable PDF syntax that our tokenizer doesn't fail outright either; it
+        // just quietly chews through nonsense operators and never finds the real content.
+        let mut content = Vec::new();
+        for stream_id in self.doc.get_page_contents(page_id) {
+            if let Ok(stream) = self.doc.get_object(stream_id).and_then(lopdf::Object::as_stream) {
+                content.extend(decode_content_stream(stream));
+                content.push(b'\n');
+            }
+        }
 
         let _ = page_dict;
         Ok(PageInfo {
@@ -86,4 +94,28 @@ impl PdfDoc {
             rotate,
         })
     }
+}
+
+/// Applies a content stream's own filter chain (in order), the same handful we support for
+/// images: FlateDecode and ASCII85Decode. Anything else (or a step that fails outright) just
+/// passes the data through as-is — a best-effort fallback, matching what lopdf's own
+/// `get_page_content` does on failure, rather than erroring out of rendering the whole page.
+fn decode_content_stream(stream: &lopdf::Stream) -> Vec<u8> {
+    use std::io::Read;
+    let filters = stream.filters().unwrap_or_default();
+    let mut data = stream.content.clone();
+    for filter in &filters {
+        data = match filter.as_str() {
+            "FlateDecode" => {
+                let mut out = Vec::with_capacity(data.len() * 3);
+                match flate2::read::ZlibDecoder::new(&data[..]).read_to_end(&mut out) {
+                    Ok(_) => out,
+                    Err(_) => return data,
+                }
+            }
+            "ASCII85Decode" => crate::content::ascii85_decode(&data).unwrap_or(data),
+            _ => data,
+        };
+    }
+    data
 }
