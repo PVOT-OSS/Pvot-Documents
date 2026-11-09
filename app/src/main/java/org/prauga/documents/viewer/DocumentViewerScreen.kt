@@ -66,6 +66,7 @@ fun DocumentViewerScreen(
     val preferences = remember { AppPreferences(context) }
     val pdfSearch = remember { PdfSearchState() }
     val pdfNavigation = remember { PdfNavigationState() }
+    val pdfSelection = remember { PdfSelectionState() }
     val readingKey = remember(uri, name) { readingKey(context, uri, name) }
     val pdfReading = remember(readingKey, preferences.darkPdfPages) {
         PdfReadingSettings(
@@ -117,14 +118,24 @@ fun DocumentViewerScreen(
             }
         },
         bottomBar = {
-            // The page indicator and the search bar share the bottom; search, when open, wins.
+            // The page indicator, the selection actions and the search bar share the bottom:
+            // search wins, then a selection, then the indicator.
             AnimatedVisibility(
-                visible = !pdfSearch.active && !pdfNavigation.overviewOpen &&
+                visible = !pdfSearch.active && !pdfSelection.active && !pdfNavigation.overviewOpen &&
                     pdfNavigation.indicatorVisible && pdfNavigation.pageCount > 1,
                 enter = fadeIn(tween(PvotDurations.Short)),
                 exit = fadeOut(tween(PvotDurations.Medium))
             ) {
                 PdfPageIndicator(pdfNavigation, onClick = { showGoToPage = true })
+            }
+            AnimatedVisibility(
+                visible = pdfSelection.active && !pdfSearch.active && !pdfNavigation.overviewOpen,
+                enter = fadeIn(tween(PvotDurations.Medium, easing = PvotMotion.Settle)) +
+                    slideInVertically(tween(PvotDurations.Medium, easing = PvotMotion.Settle)) { it / 2 },
+                exit = fadeOut(tween(PvotDurations.Short)) +
+                    slideOutVertically(tween(PvotDurations.Short)) { it / 2 }
+            ) {
+                PdfSelectionBar(pdfSelection)
             }
             AnimatedVisibility(
                 visible = pdfSearch.active,
@@ -144,6 +155,7 @@ fun DocumentViewerScreen(
                 search = pdfSearch,
                 navigation = pdfNavigation,
                 reading = pdfReading,
+                selection = pdfSelection,
                 modifier = Modifier.fillMaxSize()
             )
         } else if (format == ViewerFormat.Docx) {

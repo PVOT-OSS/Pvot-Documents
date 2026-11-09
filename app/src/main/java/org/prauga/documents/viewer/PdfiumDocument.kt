@@ -23,7 +23,9 @@ import kotlin.math.roundToInt
 
 /** A page box in page-relative fractions: 0..1 across the page's displayed width and height, top
  * to bottom. Independent of how big the page is drawn, so it survives resizing and zoom. */
-internal data class PageRect(val left: Float, val top: Float, val right: Float, val bottom: Float)
+internal data class PageRect(val left: Float, val top: Float, val right: Float, val bottom: Float) {
+    fun contains(x: Float, y: Float): Boolean = x in left..right && y in top..bottom
+}
 
 /** A page's text as Pdfium extracted it: [text] has one UTF-16 unit per character index, and
  * [boxes] holds that character's box (null for characters Pdfium generated, like the spaces and
@@ -32,8 +34,9 @@ internal class PageText(val text: String, val boxes: List<PageRect?>)
 
 internal data class SearchMatch(val pageIndex: Int, val rects: List<PageRect>)
 
-/** A link on a page: tapping [rect] goes to [destPage] in this document, or opens [uri]. */
-internal data class PageLink(val rect: PageRect, val destPage: Int?, val uri: String?)
+/** A link on a page: tapping any of [rects] goes to [destPage] in this document, or opens [uri].
+ * A web address written in the text can wrap onto the next line, hence more than one box. */
+internal data class PageLink(val rects: List<PageRect>, val destPage: Int?, val uri: String?)
 
 /** One entry of the document's outline (its bookmarks), flattened in reading order; [depth] is 0
  * for top-level entries. */
@@ -143,14 +146,27 @@ internal class PdfiumDocument private constructor(
         pageLinkCache.get(index)?.let { return@withContext it }
         val page = page(index)
         val toPage = pageMapper(page)
-        val links = page.getPageLinks().mapNotNull { link ->
+        val annotated = page.getPageLinks().mapNotNull { link ->
             val dest = link.destPageIdx?.takeIf { it in 0 until pageCount }
-            // A bare "www." address is a web link that left off its scheme.
-            val uri = link.uri?.trim()
-                ?.let { if (it.startsWith("www.", ignoreCase = true)) "https://$it" else it }
-                ?.takeIf(::isOpenableLink)
-            if (dest == null && uri == null) null else PageLink(toPage(link.bounds), dest, uri)
+            val uri = link.uri?.let(::openableUri)
+            if (dest == null && uri == null) null else PageLink(listOf(toPage(link.bounds)), dest, uri)
         }
+        // Addresses written in the text ("www.example.com", "name@example.com") that the PDF
+        // didn't make into links. Pdfium finds them, and adds the scheme. One already covered by a
+        // link annotation is left to the annotation.
+        val inText = page.openTextPage().use { textPage ->
+            textPage.loadWebLink()?.use { webLinks ->
+                (0 until webLinks.countWebLinks()).mapNotNull { i ->
+                    val uri = webLinks.getURL(i, MaxUrlLength)?.let(::openableUri) ?: return@mapNotNull null
+                    val rects = (0 until webLinks.countRects(i)).mapNotNull { r -> webLinks.getRect(i, r) }.map(toPage)
+                    val covered = rects.any { r ->
+                        annotated.any { link -> link.rects.any { it.contains((r.left + r.right) / 2f, (r.top + r.bottom) / 2f) } }
+                    }
+                    if (rects.isEmpty() || covered) null else PageLink(rects, null, uri)
+                }
+            }.orEmpty()
+        }
+        val links = annotated + inText
         pageLinkCache.put(index, links)
         links
     }
@@ -234,6 +250,15 @@ internal class PdfiumDocument private constructor(
     }
 
     companion object {
+        private const val MaxUrlLength = 2048
+
+        /** [raw] as a link we'll offer to open, or null: trimmed of the terminating NUL Pdfium
+         * includes, a bare "www." address given its scheme, and only safe schemes kept. */
+        private fun openableUri(raw: String): String? =
+            raw.trim().trimEnd('\u0000').trim()
+                .let { if (it.startsWith("www.", ignoreCase = true)) "https://$it" else it }
+                .takeIf { it.isNotEmpty() && isOpenableLink(it) }
+
         private const val OpenPageCount = 4
         private const val TextCacheCount = 12
         private const val ThumbnailCacheBytes = 24 * 1024 * 1024

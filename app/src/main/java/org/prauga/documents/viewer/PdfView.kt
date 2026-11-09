@@ -4,6 +4,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.gestures.animateScrollBy
 import android.content.ClipData
+import android.content.Intent
+import androidx.activity.compose.BackHandler
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FloatExponentialDecaySpec
@@ -19,7 +25,6 @@ import org.prauga.documents.ReadingPosition
 import androidx.compose.animation.core.animateDecay
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
@@ -39,7 +44,6 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -105,6 +109,7 @@ fun PdfView(
     search: PdfSearchState,
     navigation: PdfNavigationState,
     reading: PdfReadingSettings,
+    selection: PdfSelectionState,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -165,16 +170,10 @@ fun PdfView(
             search = search,
             navigation = navigation,
             reading = reading,
+            selectionState = selection,
             modifier = modifier,
         )
     }
-}
-
-/** A selection as Pdfium character indices on one page; [anchor] is where it started, so dragging
- * either way from there works. */
-private data class PageSelection(val anchor: Int, val focus: Int) {
-    val first get() = minOf(anchor, focus)
-    val last get() = maxOf(anchor, focus)
 }
 
 @Composable
@@ -184,6 +183,7 @@ private fun PdfContent(
     search: PdfSearchState,
     navigation: PdfNavigationState,
     reading: PdfReadingSettings,
+    selectionState: PdfSelectionState,
     modifier: Modifier,
 ) {
     val zoom = remember(document) { PdfZoomState() }
@@ -197,8 +197,12 @@ private fun PdfContent(
     val currentMatch = search.currentMatch
     val matchesByPage = remember(matches) { matches.withIndex().groupBy { it.value.pageIndex } }
 
-    var selectionPage by remember(document) { mutableIntStateOf(-1) }
-    var selection by remember(document) { mutableStateOf<PageSelection?>(null) }
+    var selection by remember(document) { mutableStateOf<DocSelection?>(null) }
+    // The pages on screen, to find which page and character a finger is over: a selection drag
+    // or a handle can move from one page onto the next.
+    val pages = remember(document) { PageRegistry() }
+    // The word a long press landed on, which a drag from that press extends from.
+    var pressedWord by remember(document) { mutableStateOf<DocSelection?>(null) }
 
     // Bumped once zoom and scroll have both been still for a moment: the cue for on-screen pages
     // to re-render their visible part at the current zoom. Waiting for the gesture to settle keeps
@@ -403,6 +407,74 @@ private fun PdfContent(
         }
     }
 
+    val context = LocalContext.current
+    val shareTitle = stringResource(R.string.viewer_pdf_share_selection)
+
+    /** The selected text, read page by page (Pdfium text for pages not on screen is loaded as
+     * needed), with a line break between pages. */
+    suspend fun selectedText(sel: DocSelection): String = buildString {
+        for (page in sel.start.page..sel.end.page) {
+            val pageText = document.pageText(page)
+            val range = sel.rangeOn(page, pageText.text.lastIndex) ?: continue
+            if (isNotEmpty()) append('\n')
+            append(pageText.text.substring(range.first, (range.last + 1).coerceAtMost(pageText.text.length)))
+        }
+    }.replace("\r\n", "\n").trim()
+
+    DisposableEffect(selectionState, document) {
+        selectionState.onCopy = {
+            selection?.let { sel ->
+                scope.launch {
+                    val text = selectedText(sel)
+                    clipboard.setClipEntry(ClipData.newPlainText(clipLabel, text).toClipEntry())
+                    selection = null
+                }
+            }
+        }
+        selectionState.onShare = {
+            selection?.let { sel ->
+                scope.launch {
+                    // A share Intent travels through a size-limited binder transaction.
+                    val text = selectedText(sel).take(ShareTextLimit)
+                    val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+                    context.startActivity(Intent.createChooser(send, shareTitle))
+                    selection = null
+                }
+            }
+        }
+        selectionState.onSearch = {
+            selection?.let { sel ->
+                scope.launch {
+                    // A search query is one line of text: the PDF keeps line breaks between lines,
+                    // so a query joining two lines would never match. The first line it is.
+                    val query = selectedText(sel).lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }
+                        .orEmpty().take(SearchFromSelectionLimit).trim()
+                    selection = null
+                    if (query.isNotEmpty()) {
+                        search.query = query
+                        search.open()
+                    }
+                }
+            }
+        }
+        selectionState.onSelectAll = {
+            scope.launch {
+                val lastPage = document.pageCount - 1
+                val lastChar = document.pageText(lastPage).text.lastIndex.coerceAtLeast(0)
+                selection = DocSelection(TextPos(0, 0), TextPos(lastPage, lastChar))
+            }
+        }
+        onDispose {
+            selectionState.active = false
+            selectionState.onCopy = {}
+            selectionState.onShare = {}
+            selectionState.onSearch = {}
+            selectionState.onSelectAll = {}
+        }
+    }
+    LaunchedEffect(selection) { selectionState.active = selection != null }
+    BackHandler(enabled = selection != null) { selection = null }
+
     var pendingLink by remember(document) { mutableStateOf<String?>(null) }
     pendingLink?.let { link -> OpenLinkDialog(link, onDismiss = { pendingLink = null }) }
 
@@ -442,22 +514,56 @@ private fun PdfContent(
                     viewportSettled = viewportSettled,
                     highlights = pageMatches.flatMap { it.value.rects },
                     currentHighlight = pageMatches.firstOrNull { it.index == currentMatch }?.value?.rects,
-                    selection = selection.takeIf { selectionPage == index },
-                    onSelectionChange = { sel ->
-                        selectionPage = if (sel == null) -1 else index
-                        selection = sel
+                    selection = selection,
+                    pages = pages,
+                    onLongPress = { windowPosition ->
+                        pages.charAt(windowPosition, onlyPage = index, skipWhitespace = true)?.let { pos ->
+                            val word = pages.text(index)?.wordAround(pos.char) ?: return@let
+                            val sel = DocSelection(TextPos(index, word.first), TextPos(index, word.last))
+                            pressedWord = sel
+                            selection = sel
+                        }
                     },
+                    onLongPressDrag = { windowPosition ->
+                        val word = pressedWord
+                        if (word != null && selection != null) {
+                            pages.charAt(windowPosition)?.let { pos ->
+                                // Dragging back past the pressed word keeps all of that word, by
+                                // anchoring on its far end.
+                                selection = if (pos < word.start) DocSelection(word.end, pos)
+                                else DocSelection(word.start, maxOf(pos, word.end))
+                            }
+                        }
+                    },
+                    onClearSelection = { selection = null },
                     pageFilter = reading.pageFilter,
                     onDoubleTap = ::toggleZoomAt,
                     onLinkTap = { link ->
                         val dest = link.destPage
                         if (dest != null) navigation.goToPage(dest) else pendingLink = link.uri
                     },
-                    onCopy = { text ->
-                        scope.launch { clipboard.setClipEntry(ClipData.newPlainText(clipLabel, text).toClipEntry()) }
-                        selectionPage = -1
-                        selection = null
-                    },
+                )
+            }
+        }
+        selection?.let { sel ->
+            // Handles sit over the list rather than inside a page, so dragging one across a page
+            // boundary doesn't drop it when the page it started on stops holding that end.
+            // State, not a plain holder: the handles can only be placed once the overlay has been
+            // laid out, and that has to bring them back into composition.
+            var overlay by remember { mutableStateOf<LayoutCoordinates?>(null) }
+            val handleColor = MaterialTheme.colorScheme.primary
+            Box(Modifier.matchParentSize().onGloballyPositioned { overlay = it }) {
+                SelectionHandle(
+                    color = handleColor,
+                    position = { pages.handlePosition(sel.start, start = true, overlay, scrollTick(listState, zoom)) },
+                    onDrag = { windowPosition -> pages.charAt(windowPosition)?.let { selection = DocSelection(sel.end, it) } },
+                    toWindow = { overlay?.takeIf { c -> c.isAttached }?.localToWindow(it) },
+                )
+                SelectionHandle(
+                    color = handleColor,
+                    position = { pages.handlePosition(sel.end, start = false, overlay, scrollTick(listState, zoom)) },
+                    onDrag = { windowPosition -> pages.charAt(windowPosition)?.let { selection = DocSelection(sel.start, it) } },
+                    toWindow = { overlay?.takeIf { c -> c.isAttached }?.localToWindow(it) },
                 )
             }
         }
@@ -508,6 +614,8 @@ internal fun pagePaper(dark: Boolean): Color = if (dark) Color.Black else Color.
 
 private const val DoubleTapZoom = 2.5f
 private const val SavePositionMillis = 1000L
+private const val ShareTextLimit = 100_000
+private const val SearchFromSelectionLimit = 100
 private const val RestoreLayoutTimeoutMillis = 1000L
 
 private val SearchBarClearance = 96.dp
@@ -632,12 +740,14 @@ private fun PdfPageItem(
     viewportSettled: Int,
     highlights: List<PageRect>,
     currentHighlight: List<PageRect>?,
-    selection: PageSelection?,
-    onSelectionChange: (PageSelection?) -> Unit,
+    selection: DocSelection?,
+    pages: PageRegistry,
+    onLongPress: (windowPosition: Offset) -> Unit,
+    onLongPressDrag: (windowPosition: Offset) -> Unit,
+    onClearSelection: () -> Unit,
     pageFilter: ColorFilter?,
     onDoubleTap: (windowPosition: Offset) -> Unit,
     onLinkTap: (PageLink) -> Unit,
-    onCopy: (String) -> Unit,
 ) {
     var size by remember { mutableStateOf(IntSize.Zero) }
     var page by remember(index) { mutableStateOf<ImageBitmap?>(null) }
@@ -651,8 +761,14 @@ private fun PdfPageItem(
         tile = null
         page = (document.cachedPage(index, size.width) ?: document.renderPage(index, size.width, size.height))
             .asImageBitmap()
-        text = document.pageText(index)
+        text = document.pageText(index).also { pages.texts[index] = it }
         links = document.pageLinks(index)
+    }
+    DisposableEffect(index) {
+        onDispose {
+            pages.coordinates.remove(index)
+            pages.texts.remove(index)
+        }
     }
 
     LaunchedEffect(viewportSettled, size, page != null) {
@@ -689,15 +805,14 @@ private fun PdfPageItem(
     val highlightColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.4f)
     val currentHighlightColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
     val selectionColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-    val handleColor = MaterialTheme.colorScheme.primary
     // The gesture coroutines below outlive recompositions, so they read these through State
     // rather than capturing whatever value was current when they started.
     val currentText = rememberUpdatedState(text)
     val currentSelection = rememberUpdatedState(selection)
     val currentLinks = rememberUpdatedState(links)
     val linkSlopPx = with(LocalDensity.current) { PvotSpacing.XS.toPx() }
-    // The word a long press landed on, which a drag from that press extends from.
-    var pressedWord by remember { mutableStateOf(IntRange.EMPTY) }
+    val selectedRange = text?.let { selection?.rangeOn(index, it.text.lastIndex) }
+    val pageDescription = stringResource(R.string.viewer_pdf_page_description, index + 1, document.pageCount)
 
     Box(modifier = Modifier.fillMaxWidth().padding(bottom = PvotSpacing.S)) {
         Box(
@@ -708,49 +823,47 @@ private fun PdfPageItem(
                 // page renders.
                 .background(pagePaper(pageFilter != null))
                 .onSizeChanged { size = it }
-                .onGloballyPositioned { coordinates.value = it }
+                .onGloballyPositioned {
+                    coordinates.value = it
+                    pages.coordinates[index] = it
+                }
+                // TalkBack reads the page's text, which on screen is only a picture of it.
+                .semantics {
+                    contentDescription = pageDescription
+                    text?.let { this.text = AnnotatedString(it.text.replace("\r\n", "\n")) }
+                }
                 .pointerInput(index) {
+                    fun toWindow(position: Offset) = coordinates.value?.takeIf { it.isAttached }?.localToWindow(position)
                     detectDragGesturesAfterLongPress(
                         onDragStart = { position ->
-                            val pageText = currentText.value ?: return@detectDragGesturesAfterLongPress
-                            pageText.charNearest(position, size, skipWhitespace = true)?.let {
-                                val word = pageText.wordAround(it)
-                                pressedWord = word
-                                onSelectionChange(PageSelection(word.first, word.last))
-                            }
+                            if (currentText.value == null) return@detectDragGesturesAfterLongPress
+                            toWindow(position)?.let(onLongPress)
                         },
-                        onDrag = { change, _ ->
-                            if (currentSelection.value == null) return@detectDragGesturesAfterLongPress
-                            currentText.value?.charNearest(change.position, size)?.let {
-                                // Dragging back past the pressed word keeps all of that word, by
-                                // anchoring on its far end.
-                                val word = pressedWord
-                                onSelectionChange(
-                                    if (it < word.first) PageSelection(word.last, it)
-                                    else PageSelection(word.first, maxOf(it, word.last))
-                                )
-                            }
-                        },
+                        onDrag = { change, _ -> toWindow(change.position)?.let(onLongPressDrag) },
                     )
                 }
                 .pointerInput(index) {
                     detectTapGestures(
+                        // A long press belongs to text selection above; without this, letting go
+                        // of one would also count as a tap, and the tap clears the selection.
+                        onLongPress = {},
                         onDoubleTap = { position ->
                             coordinates.value?.takeIf { it.isAttached }?.let { onDoubleTap(it.localToWindow(position)) }
                         },
                         onTap = { position ->
                         if (currentSelection.value != null) {
-                            onSelectionChange(null)
+                            onClearSelection()
                             return@detectTapGestures
                         }
                         // A little slop around each link, since link boxes are often just the
                         // height of a line of small text.
                         currentLinks.value.firstOrNull { link ->
-                            val r = link.rect
-                            position.x >= r.left * size.width - linkSlopPx &&
-                                position.x <= r.right * size.width + linkSlopPx &&
-                                position.y >= r.top * size.height - linkSlopPx &&
-                                position.y <= r.bottom * size.height + linkSlopPx
+                            link.rects.any { r ->
+                                position.x >= r.left * size.width - linkSlopPx &&
+                                    position.x <= r.right * size.width + linkSlopPx &&
+                                    position.y >= r.top * size.height - linkSlopPx &&
+                                    position.y <= r.bottom * size.height + linkSlopPx
+                            }
                         }?.let(onLinkTap)
                     },
                     )
@@ -769,30 +882,10 @@ private fun PdfPageItem(
                 for (r in highlights) drawRect(highlightColor, r.topLeft(this.size), r.size(this.size))
                 currentHighlight?.forEach { r -> drawRect(currentHighlightColor, r.topLeft(this.size), r.size(this.size)) }
                 val pageText = text
-                if (selection != null && pageText != null) {
-                    for (line in pageText.lineRects(selection.first, selection.last)) {
+                if (selectedRange != null && pageText != null) {
+                    for (line in pageText.lineRects(selectedRange.first, selectedRange.last)) {
                         drawRect(selectionColor, line.topLeft(this.size), line.size(this.size))
                     }
-                }
-            }
-
-            val pageText = text
-            if (selection != null && pageText != null && size.width > 0) {
-                val start = pageText.boxAtOrAfter(selection.first)
-                val end = pageText.boxAtOrBefore(selection.last)
-                if (start != null && end != null) {
-                    val startPx = Offset(start.left * size.width, start.bottom * size.height)
-                    val endPx = Offset(end.right * size.width, end.bottom * size.height)
-                    SelectionHandle(handleColor, startPx) { position ->
-                        pageText.charNearest(position, size)?.let { onSelectionChange(selection.copy(anchor = it)) }
-                    }
-                    SelectionHandle(handleColor, endPx) { position ->
-                        pageText.charNearest(position, size)?.let { onSelectionChange(selection.copy(focus = it)) }
-                    }
-                    CopySelectionChip(
-                        offsetPx = Offset(startPx.x, start.top * size.height),
-                        onClick = { onCopy(pageText.copyText(selection.first, selection.last)) },
-                    )
                 }
             }
         }
@@ -864,48 +957,93 @@ private fun PageText.lineRects(first: Int, last: Int): List<PageRect> {
     return lines
 }
 
-private fun PageText.copyText(first: Int, last: Int): String =
-    text.substring(first.coerceIn(0, text.length), (last + 1).coerceIn(0, text.length))
-        .replace("\r\n", "\n")
-        .trim()
+/** The pages currently laid out, by index: where each is on screen and its text. Lets a finger
+ * position anywhere over the document be turned into a character, whichever page it's over. */
+private class PageRegistry {
+    val coordinates = HashMap<Int, LayoutCoordinates>()
+    val texts = HashMap<Int, PageText>()
 
+    fun text(page: Int): PageText? = texts[page]
+
+    /** The character nearest [windowPosition]: on the page under it, or the nearest page above or
+     * below when it's in the gap between pages. [onlyPage] restricts it to one page. */
+    fun charAt(windowPosition: Offset, onlyPage: Int? = null, skipWhitespace: Boolean = false): TextPos? {
+        var bestPage = -1
+        var bestDistance = Float.MAX_VALUE
+        for ((page, coords) in coordinates) {
+            if (onlyPage != null && page != onlyPage) continue
+            if (!coords.isAttached || texts[page] == null) continue
+            val top = coords.localToWindow(Offset.Zero).y
+            val bottom = coords.localToWindow(Offset(0f, coords.size.height.toFloat())).y
+            val distance = when {
+                windowPosition.y < top -> top - windowPosition.y
+                windowPosition.y > bottom -> windowPosition.y - bottom
+                else -> 0f
+            }
+            if (distance < bestDistance) {
+                bestDistance = distance
+                bestPage = page
+            }
+        }
+        val coords = coordinates[bestPage] ?: return null
+        val pageText = texts[bestPage] ?: return null
+        val local = coords.windowToLocal(windowPosition)
+        return pageText.charNearest(local, coords.size, skipWhitespace)?.let { TextPos(bestPage, it) }
+    }
+
+    /** Where the start or end handle of a selection goes, in [overlay]'s coordinates: under the
+     * first or last selected character. Null when that page isn't on screen. */
+    @Suppress("UNUSED_PARAMETER")
+    fun handlePosition(pos: TextPos, start: Boolean, overlay: LayoutCoordinates?, tick: Any): Offset? {
+        val coords = coordinates[pos.page]?.takeIf { it.isAttached } ?: return null
+        val pageText = texts[pos.page] ?: return null
+        val target = overlay?.takeIf { it.isAttached } ?: return null
+        val box = (if (start) pageText.boxAtOrAfter(pos.char) else pageText.boxAtOrBefore(pos.char)) ?: return null
+        val width = coords.size.width
+        val height = coords.size.height
+        val local = Offset((if (start) box.left else box.right) * width, box.bottom * height)
+        val window = coords.localToWindow(local)
+        val inOverlay = target.windowToLocal(window)
+        // Off the visible list: no handle rather than one floating over the bars.
+        if (inOverlay.y < 0f || inOverlay.y > target.size.height) return null
+        return inOverlay
+    }
+}
+
+/** Reads the scroll and zoom state, so a handle's position is recomputed as the document moves. */
+private fun scrollTick(listState: LazyListState, zoom: PdfZoomState): Any =
+    listOf(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset, zoom.scale, zoom.offsetX, zoom.offsetY)
+
+/** A selection handle, placed by [position] (in the overlay's coordinates; null hides it) and
+ * reporting where the finger is dragged in window coordinates, so the selection can follow it onto
+ * another page. */
 @Composable
-private fun SelectionHandle(color: Color, offsetPx: Offset, onDrag: (Offset) -> Unit) {
+private fun SelectionHandle(
+    color: Color,
+    position: () -> Offset?,
+    onDrag: (windowPosition: Offset) -> Unit,
+    toWindow: (Offset) -> Offset?,
+) {
+    val at = position() ?: return
     val handleSize = 24.dp
     val half = with(LocalDensity.current) { (handleSize / 2).roundToPx() }
     // The handle moves as the selection changes; keying the gesture on its position would restart
     // it, and drop the drag, on every move.
-    val currentOffset = rememberUpdatedState(offsetPx)
+    val currentAt = rememberUpdatedState(at)
     val currentOnDrag = rememberUpdatedState(onDrag)
+    val currentToWindow = rememberUpdatedState(toWindow)
     Box(
         modifier = Modifier
-            .offset { IntOffset(offsetPx.x.roundToInt() - half, offsetPx.y.roundToInt()) }
+            .offset { IntOffset(at.x.roundToInt() - half, at.y.roundToInt()) }
             .size(handleSize)
             .pointerInput(Unit) {
                 detectDragGestures { change, _ ->
                     change.consume()
-                    currentOnDrag.value(currentOffset.value + change.position - Offset(half.toFloat(), 0f))
+                    val local = currentAt.value + change.position - Offset(half.toFloat(), 0f)
+                    currentToWindow.value(local)?.let(currentOnDrag.value)
                 }
             }
             .clip(CircleShape)
             .background(color),
     )
-}
-
-@Composable
-private fun CopySelectionChip(offsetPx: Offset, onClick: () -> Unit) {
-    val lift = with(LocalDensity.current) { 40.dp.roundToPx() }
-    Box(
-        modifier = Modifier
-            .offset { IntOffset(offsetPx.x.roundToInt(), (offsetPx.y.roundToInt() - lift).coerceAtLeast(0)) }
-            .clip(MaterialTheme.shapes.small)
-            .background(MaterialTheme.colorScheme.inverseSurface)
-            .clickable(onClick = onClick),
-    ) {
-        Text(
-            text = stringResource(R.string.viewer_pdf_copy_selection),
-            color = MaterialTheme.colorScheme.inverseOnSurface,
-            modifier = Modifier.padding(horizontal = PvotSpacing.S, vertical = PvotSpacing.XS),
-        )
-    }
 }
