@@ -31,6 +31,7 @@
                 <data android:mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
                 <data android:mimeType="application/vnd.ms-excel.sheet.macroenabled.12" />
                 <data android:mimeType="application/vnd.oasis.opendocument.spreadsheet" />
+                <data android:mimeType="application/vnd.oasis.opendocument.text" />
                 <data android:mimeType="application/csv" />
                 <data android:mimeType="application/json" />
                 <data android:mimeType="application/xml" />
@@ -45,6 +46,7 @@
                 <data android:mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
                 <data android:mimeType="application/vnd.ms-excel.sheet.macroenabled.12" />
                 <data android:mimeType="application/vnd.oasis.opendocument.spreadsheet" />
+                <data android:mimeType="application/vnd.oasis.opendocument.text" />
                 <data android:mimeType="application/csv" />
                 <data android:mimeType="application/json" />
                 <data android:mimeType="application/xml" />

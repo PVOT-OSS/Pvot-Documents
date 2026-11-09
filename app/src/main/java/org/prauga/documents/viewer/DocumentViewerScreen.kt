@@ -178,8 +178,8 @@ fun DocumentViewerScreen(
                 topPadding = padding.calculateTopPadding(),
                 modifier = Modifier.fillMaxSize()
             )
-        } else if (format == ViewerFormat.Docx) {
-            DocxView(
+        } else if (format == ViewerFormat.Docx || format == ViewerFormat.Odt) {
+            RichDocumentView(
                 uri = uri,
                 topPadding = padding.calculateTopPadding(),
                 modifier = Modifier.fillMaxSize()

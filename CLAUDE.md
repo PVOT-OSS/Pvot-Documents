@@ -57,9 +57,12 @@ if it has to be app-local for now, keep it small and list it under "Open items".
    filter chips, search, sort, list/grid, multi-select, share, rename, delete to Recently deleted.
    The "+" to create a blank Office file or start a scan.
 2. Core viewers (done): PDF, text, code, Markdown, CSV, HTML, JSON, DOCX.
-3. Office formats: XLSX/ODS, PPTX/ODP, ODT, maybe EPUB.
+3. Office formats, view-only, in this order: XLSX/ODS (done), ODT (with DOCX brought up to the
+   same level), PPTX/ODP, EPUB.
 4. Editing and PDF tools: text/Markdown/CSV editing, PDF markup and signatures, merge, split,
-   reorder, rotate, images to PDF, compress, password. Convert-to-PDF tool in Tools.
+   reorder, rotate, images to PDF, compress, password. Convert-to-PDF tool in Tools. Spreadsheet
+   editing (XLSX/ODS cell values, patched into the original file so nothing else is lost) comes
+   last, after all the phase 3 viewers.
 5. Scanner: capture, edge detection, perspective correction, filters, multi-page PDF, OCR. Lives in
    Tools and behind the "+".
 6. Later: on-device AI (summarize, translate — Tools has the slots already), tablet two-pane,
