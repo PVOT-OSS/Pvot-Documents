@@ -43,7 +43,7 @@ fun documentKind(name: String, mimeType: String): DocumentKind =
     when (name.substringAfterLast('.', missingDelimiterValue = "").lowercase()) {
         "pdf" -> DocumentKind.Pdf
         "doc", "docx" -> DocumentKind.Word
-        "xls", "xlsx", "csv" -> DocumentKind.Spreadsheet
+        "xls", "xlsx", "xlsm", "ods", "csv" -> DocumentKind.Spreadsheet
         "html", "htm" -> DocumentKind.Html
         "txt", "md", "markdown" -> DocumentKind.PlainText
         else -> mimeTypeKind(mimeType)
@@ -52,7 +52,8 @@ fun documentKind(name: String, mimeType: String): DocumentKind =
 private fun mimeTypeKind(mimeType: String): DocumentKind = when {
     mimeType == "application/pdf" -> DocumentKind.Pdf
     mimeType.contains("wordprocessingml") || mimeType == "application/msword" -> DocumentKind.Word
-    mimeType.contains("spreadsheetml") || mimeType == "text/csv" ||
+    mimeType.contains("spreadsheetml") || mimeType == "application/vnd.oasis.opendocument.spreadsheet" ||
+        mimeType == "text/csv" ||
         mimeType == "application/csv" -> DocumentKind.Spreadsheet
     mimeType == "text/html" -> DocumentKind.Html
     mimeType.startsWith("text/") -> DocumentKind.PlainText
