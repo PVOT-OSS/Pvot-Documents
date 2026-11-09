@@ -228,16 +228,14 @@ impl<'a> Interp<'a> {
             "l" => if ops.len() == 2 { self.open_path(); self.lineto(ops[0].as_f32(), ops[1].as_f32()); },
             "c" => if ops.len() == 6 { self.open_path(); self.curveto(ops); },
             "v" => if ops.len() == 4 {
-                // v: current point is the first control point.
-                self.open_path();
-                self.writer.op(OP_CURVE_TO);
-                // Reuse current point as (x1,y1) by writing it via last moveto — approximate by
-                // treating it as a 3-point curve degenerating control 1 to the end point's own
-                // start; acceptable visual approximation for the rare `v` operator.
-                let (x1, y1) = (ops[0].as_f32(), ops[1].as_f32());
+                // v: the first control point is the current point (not tracked separately here,
+                // per the module's content-stream model) — approximated by degenerating control
+                // point 1 to control point 2, an acceptable visual approximation for this rare
+                // operator. write_curve emits its own OP_CURVE_TO; an explicit one here on top of
+                // it was a real bug — it desynced every wire op after the first `v` on a page.
                 let (x2, y2) = (ops[0].as_f32(), ops[1].as_f32());
                 let (x3, y3) = (ops[2].as_f32(), ops[3].as_f32());
-                let _ = (x1, y1);
+                self.open_path();
                 self.write_curve(x2, y2, x2, y2, x3, y3);
             },
             "y" => if ops.len() == 4 {
@@ -396,7 +394,8 @@ impl<'a> Interp<'a> {
     }
 
     fn load_font_cached(&mut self, name: &[u8], resources: &Dictionary) -> std::rc::Rc<Font> {
-        if let Some(f) = self.font_cache.get(name) {
+        let key = self.font_cache_key(name, resources);
+        if let Some(f) = self.font_cache.get(&key) {
             return f.clone();
         }
         let font = self.resolve_font_dict(name, resources)
@@ -411,8 +410,35 @@ impl<'a> Interp<'a> {
                 is_italic: false,
             });
         let rc = std::rc::Rc::new(font);
-        self.font_cache.insert(name.to_vec(), rc.clone());
+        self.font_cache.insert(key, rc.clone());
         rc
+    }
+
+    /// A font cache key based on the resource-local name alone (e.g. `TT0`) is wrong: Form
+    /// XObjects — especially the ones HTML-to-PDF generators emit, one Form per "div" — routinely
+    /// each have their *own*, *different* font mapped to the same conventional local name. Caching
+    /// by name alone made the first Form's font metrics leak into every other Form that happened
+    /// to reuse "TT0"/"TT1"/etc., producing wrong glyph advances (text rendering overlapped or
+    /// mis-spaced) anywhere past the first such Form on a page. Keying by the font object's own
+    /// `ObjectId` is both correct (globally stable identity) and still shares the cache properly
+    /// when multiple Forms legitimately reference the exact same font object.
+    fn font_cache_key(&self, name: &[u8], resources: &Dictionary) -> Vec<u8> {
+        if let Ok(font_dict_obj) = resources.get(b"Font") {
+            if let Ok((_, font_dict_obj)) = self.doc.dereference(font_dict_obj) {
+                if let Ok(fonts) = font_dict_obj.as_dict() {
+                    if let Ok(font_obj) = fonts.get(name) {
+                        if let Ok((obj, gen)) = font_obj.as_reference() {
+                            return format!("ref:{obj}:{gen}").into_bytes();
+                        }
+                    }
+                }
+            }
+        }
+        // Inline (non-referenced) font dict: no stable global identity to key on, so scope by
+        // this call's own resources dict address plus name instead.
+        let mut key = format!("ptr:{:p}:", resources).into_bytes();
+        key.extend_from_slice(name);
+        key
     }
 
     /// Resolves `resources`'s `/Font /<name>` entry to the font's dictionary, dereferencing the
