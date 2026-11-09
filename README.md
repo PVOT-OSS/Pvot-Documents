@@ -4,7 +4,25 @@ A documents app that you need but is not provided to you: one private, offline p
 organize and work with the documents on your phone. Built on the
 [Pvot design system](https://github.com/PVOT-OSS/PvotLib).
 
-> **Status:** early. Phase 0 (project scaffold) is done; nothing opens a document yet.
+> **Status:** early. It opens PDF, Word, OpenDocument text, spreadsheets, slides and plain-text
+> files, all view-only. Editing, the PDF tools and the scanner are not built yet.
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/pdf.png" alt="PDF reader with a field guide open" width="220" height="481">
+  &nbsp;
+  <img src="docs/screenshots/pdf-search.png" alt="Searching a PDF, with every match highlighted" width="220" height="481">
+  &nbsp;
+  <img src="docs/screenshots/slides.png" alt="A PowerPoint deck drawn as laid out" width="220" height="481">
+</p>
+<p align="center">
+  <img src="docs/screenshots/spreadsheet.png" alt="An Excel budget with fills, number formats and frozen headers" width="220" height="481">
+  &nbsp;
+  <img src="docs/screenshots/word.png" alt="A Word document with headings and a picture" width="220" height="481">
+  &nbsp;
+  <img src="docs/screenshots/manage.png" alt="Manage tab: allowed folders, search, sort and the file list" width="220" height="481">
+</p>
 
 ## Roadmap
 
