@@ -47,7 +47,7 @@ fn extract_glyphs(wire: &[u8]) -> Vec<Glyph> {
                 glyphs.push(Glyph { text, x, y, font_size, advance });
                 i = end;
             }
-            OP_DRAW_IMAGE => i += 18,
+            OP_DRAW_IMAGE => i += 26, // 6 f32 (CTM) + u16 imageIndex
             OP_END => break,
             _ => break,
         }

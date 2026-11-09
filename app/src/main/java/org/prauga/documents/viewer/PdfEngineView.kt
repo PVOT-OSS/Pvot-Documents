@@ -3,7 +3,6 @@ package org.prauga.documents.viewer
 import android.content.Context
 import android.graphics.Paint
 import android.graphics.Path as AndroidPath
-import android.graphics.RectF
 import android.graphics.Typeface
 import android.net.Uri
 import androidx.compose.foundation.Canvas
@@ -323,13 +322,19 @@ private fun Modifier.pinchZoomEngine(zoom: PdfEngineZoomState): Modifier = this.
     awaitEachGesture {
         do {
             val event = awaitPointerEvent()
-            if (event.changes.size >= 2) {
+            // A plain one-finger drag only needs handling here once already zoomed in — at 1x it
+            // must fall through untouched so the LazyColumn's own vertical scroll still works.
+            // Without this, panning only ever worked mid-pinch (two fingers down); as soon as the
+            // second finger lifted, a zoomed-in page became unpannable.
+            if (event.changes.size >= 2 || zoom.scale > 1f) {
                 val zoomChange = event.calculateZoom()
                 val panChange = event.calculatePan()
                 zoom.scale = (zoom.scale * zoomChange).coerceIn(1f, MaxPdfEngineZoom)
                 if (zoom.scale > 1f) {
-                    zoom.offsetX += panChange.x
-                    zoom.offsetY += panChange.y
+                    val maxOffsetX = size.width * (zoom.scale - 1f) / 2f
+                    val maxOffsetY = size.height * (zoom.scale - 1f) / 2f
+                    zoom.offsetX = (zoom.offsetX + panChange.x).coerceIn(-maxOffsetX, maxOffsetX)
+                    zoom.offsetY = (zoom.offsetY + panChange.y).coerceIn(-maxOffsetY, maxOffsetY)
                 } else {
                     zoom.offsetX = 0f
                     zoom.offsetY = 0f
@@ -363,7 +368,14 @@ private fun PdfPageItem(
         }
     }
 
-    val aspect = (pageSize.width / pageSize.height).let { if (it.isFinite() && it > 0f) it else 0.77f }
+    // /Rotate (common on phone-scanned pages: the photo is landscape but the page is portrait
+    // with a 90/270 rotation) swaps which axis is "width" for display purposes. The glyph/path
+    // coordinates we get from the engine are still in the page's own unrotated space — drawPdfPage
+    // applies the actual rotation transform when painting — but the on-screen aspect ratio (and
+    // thus how big a card this page gets in the list) has to account for it up front.
+    val rotated90 = pageSize.rotateDegrees == 90 || pageSize.rotateDegrees == 270
+    val aspect = (if (rotated90) pageSize.height / pageSize.width else pageSize.width / pageSize.height)
+        .let { if (it.isFinite() && it > 0f) it else 0.77f }
     val highlightColor = MaterialTheme.colorScheme.tertiary
     val currentHighlightColor = MaterialTheme.colorScheme.primary
     val selectionColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
@@ -420,11 +432,19 @@ private fun PdfPageItem(
                         )
                     },
             ) {
-                val scale = size.width / pageSize.width
+                // The canvas is already sized to the ROTATED aspect ratio (see `aspect` above);
+                // scale maps unrotated page-space units into that rotated frame along whichever
+                // axis corresponds to the page's own width, then drawPdfPage rotates the canvas
+                // to lay the unrotated content out correctly before painting it.
+                val scale = if (rotated90) size.width / pageSize.height else size.width / pageSize.width
                 drawPdfPage(
                     page = currentPage,
                     scale = scale,
                     heightPx = size.height,
+                    widthPx = size.width,
+                    rotateDegrees = pageSize.rotateDegrees,
+                    pageWidthPx = pageSize.width * scale,
+                    pageHeightPx = pageSize.height * scale,
                     searchHighlights = searchHighlights,
                     highlightColor = highlightColor,
                     currentMatchRect = currentMatchRect,
@@ -435,6 +455,11 @@ private fun PdfPageItem(
                 )
             }
 
+            // Known gap: unlike drawPdfPage, this block (selection handles/copy chip) and the
+            // long-press-drag hit-testing above don't account for pageSize.rotateDegrees — a
+            // rotated page with real selectable text would show handles in the wrong place. Not
+            // fixed here since every rotated PDF seen in practice so far has been a scanned image
+            // (no glyphs at all, so this block never runs for them).
             if (selection != null && glyphs.isNotEmpty()) {
                 val scale = with(LocalDensity.current) { widthPx.toFloat() }.let { widthPx.toFloat() / pageSize.width }
                 val lo = selection.lo.coerceIn(0, glyphs.size - 1)
@@ -528,6 +553,10 @@ private fun DrawScope.drawPdfPage(
     page: PdfPage,
     scale: Float,
     heightPx: Float,
+    widthPx: Float,
+    rotateDegrees: Int,
+    pageWidthPx: Float,
+    pageHeightPx: Float,
     searchHighlights: List<PdfRect>,
     highlightColor: Color,
     currentMatchRect: PdfRect?,
@@ -537,15 +566,26 @@ private fun DrawScope.drawPdfPage(
     selectionColor: Color,
 ) {
     fun toPxX(x: Float) = x * scale
-    fun toPxY(y: Float) = heightPx - y * scale
+    fun toPxY(y: Float) = pageHeightPx - y * scale
 
     drawIntoCanvas { canvas ->
         val nc = canvas.nativeCanvas
         var saveDepth = 0
 
+        // Ops below are laid out in the page's own unrotated local frame (pageWidthPx x
+        // pageHeightPx); /Rotate is a display-only transform the content stream knows nothing
+        // about, so it's applied once here as a canvas rotation around the real canvas center,
+        // translating the unrotated frame's center to line up with it. For rotateDegrees == 0
+        // this is a no-op translate (pageWidthPx/pageHeightPx already equal widthPx/heightPx).
+        nc.save()
+        nc.translate(widthPx / 2f, heightPx / 2f)
+        nc.rotate(rotateDegrees.toFloat())
+        nc.translate(-pageWidthPx / 2f, -pageHeightPx / 2f)
+
         val fillPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL }
         val strokePaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE }
         val textPaint = Paint().apply { isAntiAlias = true }
+        val imagePaint = Paint().apply { isAntiAlias = true; isFilterBitmap = true }
         val typefaceRegular = Typeface.DEFAULT
         val typefaceBold = Typeface.DEFAULT_BOLD
         val typefaceItalic = Typeface.create(Typeface.DEFAULT, Typeface.ITALIC)
@@ -610,16 +650,30 @@ private fun DrawScope.drawPdfPage(
                 }
                 is PdfDrawOp.DrawImage -> {
                     val bitmap = page.imageBitmap(op.imageIndex)
-                    if (bitmap != null) {
-                        val left = toPxX(op.x)
-                        val right = toPxX(op.x + op.w)
-                        val top = toPxY(op.y + op.h)
-                        val bottom = toPxY(op.y)
-                        nc.drawBitmap(
-                            bitmap, null,
-                            RectF(minOf(left, right), minOf(top, bottom), maxOf(left, right), maxOf(top, bottom)),
-                            null,
-                        )
+                    val bw = bitmap?.width?.toFloat() ?: 0f
+                    val bh = bitmap?.height?.toFloat() ?: 0f
+                    if (bitmap != null && bw > 0f && bh > 0f) {
+                        // Compose the content stream's own CTM (unit square -> page space) with
+                        // our page-space -> device transform (scale + y-flip done by toPxX/toPxY
+                        // elsewhere), then with bitmap-pixel -> unit-square, as one matrix. A
+                        // rotated/sheared `cm` (routine for phone-scanned pages placing a
+                        // landscape capture on a portrait page) needs that real transform —
+                        // reducing it to an axis-aligned destination rect (as a plain
+                        // src/dst-rect drawBitmap would) comes out an unrotated, squashed mess.
+                        val bigA = scale * op.a
+                        val bigB = -scale * op.b
+                        val bigC = scale * op.c
+                        val bigD = -scale * op.d
+                        val bigE = scale * op.e
+                        val bigF = pageHeightPx - scale * op.f
+                        val imageMatrix = android.graphics.Matrix().apply {
+                            setValues(floatArrayOf(
+                                bigA / bw, -bigC / bh, bigC + bigE,
+                                bigB / bw, -bigD / bh, bigD + bigF,
+                                0f, 0f, 1f,
+                            ))
+                        }
+                        nc.drawBitmap(bitmap, imageMatrix, imagePaint)
                     }
                 }
             }
@@ -653,5 +707,6 @@ private fun DrawScope.drawPdfPage(
                 )
             }
         }
+        nc.restore()
     }
 }

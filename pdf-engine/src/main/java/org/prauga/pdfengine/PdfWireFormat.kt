@@ -42,7 +42,13 @@ sealed interface PdfDrawOp {
         val text: String,
     ) : PdfDrawOp
 
-    data class DrawImage(val x: Float, val y: Float, val w: Float, val h: Float, val imageIndex: Int) : PdfDrawOp
+    /** The CTM (PDF convention: (x,y) -> (a*x + c*y + e, b*x + d*y + f)) mapping the image's unit
+     * square to page space — not reduced to a bounding box, so a rotated/sheared placement (phone
+     * scans are often like this) survives into the actual drawn matrix. */
+    data class DrawImage(
+        val a: Float, val b: Float, val c: Float, val d: Float, val e: Float, val f: Float,
+        val imageIndex: Int,
+    ) : PdfDrawOp
 
     /** The `n` operator: discards the path built since the last paint op without painting it
      * (typically following `re W n` to clip without filling). Must reset the renderer's path
@@ -108,7 +114,8 @@ object PdfWireFormat {
                     )
                 }
                 OP_DRAW_IMAGE -> ops += PdfDrawOp.DrawImage(
-                    buf.float, buf.float, buf.float, buf.float, buf.short.toInt() and 0xFFFF,
+                    buf.float, buf.float, buf.float, buf.float, buf.float, buf.float,
+                    buf.short.toInt() and 0xFFFF,
                 )
                 OP_END_PATH -> ops += PdfDrawOp.EndPath
                 OP_END -> return ops

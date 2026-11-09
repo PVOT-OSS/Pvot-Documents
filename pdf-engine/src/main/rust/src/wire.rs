@@ -24,7 +24,10 @@
 //! - 12 RESTORE_STATE
 //! - 13 DRAW_GLYPH        f32 x, f32 y, f32 fontSize, f32 advance, u8 style (bit0 bold, bit1
 //!   italic), u16 utf8Len, [u8; utf8Len]
-//! - 14 DRAW_IMAGE        f32 x, f32 y, f32 w, f32 h, u16 imageIndex
+//! - 14 DRAW_IMAGE        f32 a, f32 b, f32 c, f32 d, f32 e, f32 f, u16 imageIndex — the CTM
+//!   mapping the image's unit square to page space (not just a bounding box: images placed via a
+//!   rotated or skewed `cm`, common for phone-scanned pages, need the real transform or they come
+//!   out as an unrotated, non-uniformly stretched mess)
 //! - 15 END_PATH          discards the path built since the last paint/clear op, without
 //!   painting it (the `n` operator — typically following `re W n` to clip without filling).
 //!   Every op that consumes the accumulated path (a paint op or this one) MUST be emitted, or

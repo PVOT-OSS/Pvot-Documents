@@ -13,6 +13,7 @@ jni = "0.21"
 lopdf = { version = "0.33", default-features = false, features = ["pom_parser"] }
 flate2 = "1"
 encoding_rs = "0.8"
+zune-jpeg = "0.5.15"
 
 [profile.release]
 panic = "unwind"

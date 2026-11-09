@@ -506,37 +506,88 @@ impl<'a> Interp<'a> {
             return;
         }
         let bpc = stream.dict.get(b"BitsPerComponent").and_then(|o| o.as_i64()).unwrap_or(8);
-        let filter_is_dct = stream
+        let filter_is_jpx = stream
             .dict
             .get(b"Filter")
-            .map(|f| filter_contains(f, b"DCTDecode") || filter_contains(f, b"JPXDecode"))
+            .map(|f| filter_contains(f, b"JPXDecode"))
             .unwrap_or(false);
-        if filter_is_dct || bpc != 8 {
-            return; // JPEG/JPX and non-8bpc images are a follow-up (need a JPEG decoder).
+        if filter_is_jpx || bpc != 8 {
+            return; // JPEG2000 and non-8bpc images are a follow-up.
         }
         let is_mask = stream.dict.get(b"ImageMask").and_then(|o| o.as_bool()).unwrap_or(false);
         if is_mask {
             return;
         }
-        let color_space = stream
+        let filter_is_dct = stream
             .dict
-            .get(b"ColorSpace")
-            .and_then(|o| self.doc.dereference(o))
-            .ok()
-            .map(|(_, o)| o.as_name().map(|n| n.to_vec()).unwrap_or_default())
-            .unwrap_or_default();
-        let channels: usize = if color_space == b"DeviceGray" || color_space == b"CalGray" { 1 }
-            else if color_space == b"DeviceCMYK" { 4 }
-            else { 3 };
-        // `lopdf::Stream::decompressed_content` unconditionally refuses any stream whose
-        // `/Subtype` is `/Image` (it returns `Error::Type`) — image data needs predictor/
-        // colorspace handling it doesn't do, so it pushes that to the caller rather than
-        // half-doing it. We do our own Flate + PNG-predictor decode instead.
-        let Some(data) = self.decompress_image_stream(stream, channels, width as usize) else { return };
+            .get(b"Filter")
+            .map(|f| filter_contains(f, b"DCTDecode"))
+            .unwrap_or(false);
+        let (channels, data) = if filter_is_dct {
+            // Scanned pages (photos of signed documents, IDs) are almost always a single
+            // full-page DCTDecode (JPEG) image — skipping these left every such PDF entirely
+            // blank. `/Filter` can still list e.g. FlateDecode ahead of DCTDecode (some
+            // generators re-compress the already-JPEG-encoded stream), so peel those off first.
+            let Some(jpeg_bytes) = self.raw_filtered_bytes_before_dct(stream) else { return };
+            let mut decoder = zune_jpeg::JpegDecoder::new(std::io::Cursor::new(jpeg_bytes.as_slice()));
+            let Ok(pixels) = decoder.decode() else { return };
+            let Some(info) = decoder.info() else { return };
+            if info.width as u32 != width || info.height as u32 != height || pixels.is_empty() {
+                return;
+            }
+            let ch = pixels.len() / (width as usize * height as usize);
+            if ch == 0 {
+                return;
+            }
+            (ch, pixels)
+        } else {
+            let color_space = stream
+                .dict
+                .get(b"ColorSpace")
+                .and_then(|o| self.doc.dereference(o))
+                .ok()
+                .map(|(_, o)| o.as_name().map(|n| n.to_vec()).unwrap_or_default())
+                .unwrap_or_default();
+            let channels: usize = if color_space == b"DeviceGray" || color_space == b"CalGray" { 1 }
+                else if color_space == b"DeviceCMYK" { 4 }
+                else { 3 };
+            // `lopdf::Stream::decompressed_content` unconditionally refuses any stream whose
+            // `/Subtype` is `/Image` (it returns `Error::Type`) — image data needs predictor/
+            // colorspace handling it doesn't do, so it pushes that to the caller rather than
+            // half-doing it. We do our own Flate + PNG-predictor decode instead.
+            let Some(data) = self.decompress_image_stream(stream, channels, width as usize) else { return };
+            (channels, data)
+        };
         let expected = width as usize * height as usize * channels;
         if data.len() < expected {
             return;
         }
+        // `/SMask` is a separate grayscale image giving this one's per-pixel alpha — common for
+        // any PNG-sourced image with transparency (logos, icons, drop shadows). Skipping it makes
+        // the image fully opaque, which turns a transparent-background graphic into a solid block
+        // that can blot out whatever page content was meant to show through (and, since the block
+        // takes its color from whatever garbage pixels sat in the "transparent" area of the source
+        // PNG, it rarely even looks like a sensible solid color).
+        let smask: Option<Vec<u8>> = stream
+            .dict
+            .get(b"SMask")
+            .and_then(|o| self.doc.dereference(o))
+            .ok()
+            .and_then(|(_, o)| o.as_stream().ok())
+            .and_then(|smask_stream| {
+                let sw = smask_stream.dict.get(b"Width").and_then(|o| o.as_i64()).unwrap_or(0) as u32;
+                let sh = smask_stream.dict.get(b"Height").and_then(|o| o.as_i64()).unwrap_or(0) as u32;
+                if sw != width || sh != height {
+                    return None; // mismatched-size masks are a rare edge case; fall back to opaque.
+                }
+                let sbpc = smask_stream.dict.get(b"BitsPerComponent").and_then(|o| o.as_i64()).unwrap_or(8);
+                if sbpc != 8 {
+                    return None;
+                }
+                self.decompress_image_stream(smask_stream, 1, sw as usize)
+            })
+            .filter(|data| data.len() >= (width as usize * height as usize));
+
         let mut rgba = vec![0u8; width as usize * height as usize * 4];
         for i in 0..(width as usize * height as usize) {
             let (r, g, b) = match channels {
@@ -557,20 +608,44 @@ impl<'a> Interp<'a> {
             rgba[i * 4] = r;
             rgba[i * 4 + 1] = g;
             rgba[i * 4 + 2] = b;
-            rgba[i * 4 + 3] = 255;
+            rgba[i * 4 + 3] = smask.as_ref().map(|m| m[i]).unwrap_or(255);
         }
         let idx = self.images.len() as u16;
         self.images.push(DecodedImage { width, height, rgba });
 
-        // Unit square -> CTM gives the image's placement; corners give x,y,w,h in device space.
-        let (x0, y0) = self.gs.ctm.apply(0.0, 0.0);
-        let (x1, y1) = self.gs.ctm.apply(1.0, 1.0);
+        // Hand the raw CTM to Kotlin rather than reducing it to a bounding box — a `cm` with a
+        // rotation or shear component (routine for phone-scanned pages, where the capture is
+        // landscape but the page is portrait) needs the real transform, not just where its
+        // corners land.
         self.writer.op(OP_DRAW_IMAGE);
-        self.writer.f32(x0.min(x1));
-        self.writer.f32(y0.min(y1));
-        self.writer.f32((x1 - x0).abs());
-        self.writer.f32((y1 - y0).abs());
+        self.writer.f32(self.gs.ctm.a);
+        self.writer.f32(self.gs.ctm.b);
+        self.writer.f32(self.gs.ctm.c);
+        self.writer.f32(self.gs.ctm.d);
+        self.writer.f32(self.gs.ctm.e);
+        self.writer.f32(self.gs.ctm.f);
         self.writer.u16(idx);
+    }
+
+    /// Applies any filters ahead of a `DCTDecode` in the chain (some generators re-compress an
+    /// already-JPEG stream with FlateDecode) and returns the resulting raw JPEG bytes, ready for
+    /// `zune_jpeg`. Filters are applied in the order they're listed, per spec.
+    fn raw_filtered_bytes_before_dct(&self, stream: &lopdf::Stream) -> Option<Vec<u8>> {
+        use std::io::Read;
+        let filters = stream.filters().ok()?;
+        let mut data = stream.content.clone();
+        for filter in &filters {
+            match filter.as_str() {
+                "FlateDecode" => {
+                    let mut out = Vec::with_capacity(data.len() * 3);
+                    flate2::read::ZlibDecoder::new(&data[..]).read_to_end(&mut out).ok()?;
+                    data = out;
+                }
+                "DCTDecode" => return Some(data),
+                _ => return None,
+            }
+        }
+        None // DCTDecode never showed up — not actually a JPEG stream.
     }
 
     /// Flate-decodes an image stream's raw content ourselves and reverses a PNG predictor if
