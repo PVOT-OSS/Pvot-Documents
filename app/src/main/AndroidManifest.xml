@@ -47,9 +47,13 @@
 
         <!-- Opens one document, chosen from Recent or Manage; see DocumentViewerActivity.start(). -->
         <!-- adjustResize: the PDF search bar rides on the keyboard through its insets; the
-             default pan would shove the whole viewer, top bar included, up off the screen. -->
+             default pan would shove the whole viewer, top bar included, up off the screen.
+             configChanges: rotating or resizing re-lays out the open document in place instead
+             of restarting the activity, which would reopen it and lose the search, selection,
+             zoom and an encrypted PDF's password. Compose follows the new size by itself. -->
         <activity
             android:name=".viewer.DocumentViewerActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
 

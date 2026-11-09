@@ -211,6 +211,18 @@ internal class PdfiumDocument private constructor(
         }
     }
 
+    /** Drops every cache — page renders, thumbnails, and the open Pdfium pages along with the
+     * images Pdfium decoded for them — when the system asks the app to give memory back. A
+     * scanned document holds several large decoded images per open page. Runs after any queued
+     * render, so nothing in use is closed underneath it; pages simply re-render on demand. */
+    fun trimMemory() {
+        scope.launch {
+            pageBitmaps.evictAll()
+            thumbnails.evictAll()
+            openPages.evictAll()
+        }
+    }
+
     /** Releases the document once any render or search already queued has finished. */
     fun close() {
         scope.launch {

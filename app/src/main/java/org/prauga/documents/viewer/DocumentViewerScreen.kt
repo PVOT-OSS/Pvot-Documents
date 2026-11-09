@@ -28,6 +28,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -37,9 +38,12 @@ import androidx.compose.ui.unit.Dp
 import com.prauga.pvot.coreui.PvotErrorContent
 import com.prauga.pvot.coreui.PvotLoadingContent
 import com.prauga.pvot.coreui.UiState
+import androidx.compose.material3.SnackbarHostState
 import com.prauga.pvot.designsystem.components.PvotScreenScaffold
+import com.prauga.pvot.designsystem.components.PvotSnackbarHost
 import com.prauga.pvot.designsystem.navigation.PvotTopBar
 import com.prauga.pvot.designsystem.theme.PvotSpacing
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -67,6 +71,15 @@ fun DocumentViewerScreen(
     val pdfSearch = remember { PdfSearchState() }
     val pdfNavigation = remember { PdfNavigationState() }
     val pdfSelection = remember { PdfSelectionState() }
+    val snackbar = remember { SnackbarHostState() }
+    // Collected rather than keyed on the notice: clearing it would change the key and cancel the
+    // effect before the snackbar had shown.
+    LaunchedEffect(pdfSelection) {
+        snapshotFlow { pdfSelection.notice }.filterNotNull().collect { notice ->
+            pdfSelection.notice = null
+            snackbar.showSnackbar(notice)
+        }
+    }
     val readingKey = remember(uri, name) { readingKey(context, uri, name) }
     val pdfReading = remember(readingKey, preferences.darkPdfPages) {
         PdfReadingSettings(
@@ -117,6 +130,7 @@ fun DocumentViewerScreen(
                 }
             }
         },
+        snackbarHost = { PvotSnackbarHost(snackbar) },
         bottomBar = {
             // The page indicator, the selection actions and the search bar share the bottom:
             // search wins, then a selection, then the indicator.
