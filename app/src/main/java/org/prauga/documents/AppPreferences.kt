@@ -176,6 +176,35 @@ class AppPreferences(context: Context) {
         trashedDocuments = updated
     }
 
+    /** Whether PDF pages are drawn dark (colors inverted, hues kept) for reading at night. */
+    var darkPdfPages by mutableStateOf(prefs.getBoolean(KEY_DARK_PDF_PAGES, false))
+        private set
+
+    fun updateDarkPdfPages(enabled: Boolean) {
+        prefs.edit { putBoolean(KEY_DARK_PDF_PAGES, enabled) }
+        darkPdfPages = enabled
+    }
+
+    /** Where reading stopped in the document [key] names (see `readingKey` in the viewer), if
+     * it has been opened before. */
+    fun readingPosition(key: String): ReadingPosition? {
+        return decodeReadingPositions(prefs.getString(KEY_READING_POSITIONS, null))
+            .firstOrNull { it.first == key }?.second
+    }
+
+    /** Remembers [position] for the document [key] names, most recent first; only the last
+     * [MaxReadingPositions] documents are kept, so the list doesn't grow forever. */
+    fun saveReadingPosition(key: String, position: ReadingPosition) {
+        val existing = decodeReadingPositions(prefs.getString(KEY_READING_POSITIONS, null))
+        val updated = (listOf(key to position) + existing.filterNot { it.first == key })
+            .take(MaxReadingPositions)
+        val json = JSONArray()
+        updated.forEach { (entryKey, pos) ->
+            json.put(JSONObject().put("key", entryKey).put("page", pos.page).put("offset", pos.offsetFraction.toDouble()))
+        }
+        prefs.edit { putString(KEY_READING_POSITIONS, json.toString()) }
+    }
+
     private companion object {
         const val PREFS_NAME = "documents_preferences"
         const val KEY_GLASS_INTENSITY = "glass_intensity"
@@ -186,6 +215,18 @@ class AppPreferences(context: Context) {
         const val KEY_AUTOSAVE = "autosave_opened_documents"
         const val KEY_RECENT = "recent_documents"
         const val KEY_TRASH = "trashed_documents"
+        const val KEY_DARK_PDF_PAGES = "dark_pdf_pages"
+        const val KEY_READING_POSITIONS = "reading_positions"
+        const val MaxReadingPositions = 100
+
+        fun decodeReadingPositions(json: String?): List<Pair<String, ReadingPosition>> =
+            runCatching {
+                val array = JSONArray(json ?: return emptyList())
+                List(array.length()) { i ->
+                    val o = array.getJSONObject(i)
+                    o.getString("key") to ReadingPosition(o.getInt("page"), o.optDouble("offset", 0.0).toFloat())
+                }
+            }.getOrDefault(emptyList())
         const val MaxRecentDocuments = 50
         const val FolderPermissionFlags =
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
@@ -249,3 +290,7 @@ class AppPreferences(context: Context) {
         }
     }
 }
+
+/** A place in a PDF: the zero-based [page] at the top of the screen, and how far down it the screen
+ * starts, as a fraction of the page's height. */
+data class ReadingPosition(val page: Int, val offsetFraction: Float)

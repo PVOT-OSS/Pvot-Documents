@@ -1,6 +1,8 @@
 package org.prauga.documents.viewer
 
+import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -41,6 +43,7 @@ import com.prauga.pvot.designsystem.theme.PvotSpacing
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import org.prauga.documents.AppPreferences
 import org.prauga.documents.R
 import org.prauga.documents.data.DocumentsRepository
 import org.prauga.documents.util.ViewerFormat
@@ -59,28 +62,56 @@ fun DocumentViewerScreen(
     format: ViewerFormat,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
+    val preferences = remember { AppPreferences(context) }
     val pdfSearch = remember { PdfSearchState() }
     val pdfNavigation = remember { PdfNavigationState() }
+    val readingKey = remember(uri, name) { readingKey(context, uri, name) }
+    val pdfReading = remember(readingKey, preferences.darkPdfPages) {
+        PdfReadingSettings(
+            initialPosition = preferences.readingPosition(readingKey),
+            onPositionChange = { preferences.saveReadingPosition(readingKey, it) },
+            pageFilter = if (preferences.darkPdfPages) DarkPageFilter else null,
+        )
+    }
     var showGoToPage by remember { mutableStateOf(false) }
     var showContents by remember { mutableStateOf(false) }
+    var showOptions by remember { mutableStateOf(false) }
     if (showGoToPage) GoToPageDialog(pdfNavigation, onDismiss = { showGoToPage = false })
     if (showContents) PdfContentsSheet(pdfNavigation, onDismiss = { showContents = false })
+    if (showOptions) {
+        PdfViewOptionsSheet(
+            darkPages = preferences.darkPdfPages,
+            onDarkPagesChange = preferences::updateDarkPdfPages,
+            onPages = { pdfNavigation.overviewOpen = true },
+            onGoToPage = { showGoToPage = true },
+            onDismiss = { showOptions = false },
+        )
+    }
+    // The top bar's back arrow leaves the page overview first, like the back gesture does.
+    val back = { if (pdfNavigation.overviewOpen) pdfNavigation.overviewOpen = false else onBack() }
+    val pdfToolsShown = pdfSearch.available && !pdfSearch.active && !pdfNavigation.overviewOpen
 
     PvotScreenScaffold(
         topBar = {
-            PvotTopBar(title = name, onBack = onBack, compact = true) {
-                if (pdfNavigation.outline.isNotEmpty() && !pdfSearch.active) {
+            PvotTopBar(title = name, onBack = back, compact = true) {
+                if (pdfNavigation.outline.isNotEmpty() && pdfToolsShown) {
                     PvotTopBarAction(
                         icon = painterResource(R.drawable.ic_list),
                         contentDescription = stringResource(R.string.viewer_pdf_contents),
                         onClick = { showContents = true }
                     )
                 }
-                if (pdfSearch.available && !pdfSearch.active) {
+                if (pdfToolsShown) {
                     PvotTopBarAction(
                         icon = painterResource(R.drawable.ic_search),
                         contentDescription = stringResource(R.string.viewer_pdf_search),
                         onClick = pdfSearch::open
+                    )
+                    PvotTopBarAction(
+                        icon = painterResource(R.drawable.ic_more),
+                        contentDescription = stringResource(R.string.viewer_pdf_more),
+                        onClick = { showOptions = true }
                     )
                 }
             }
@@ -88,7 +119,8 @@ fun DocumentViewerScreen(
         bottomBar = {
             // The page indicator and the search bar share the bottom; search, when open, wins.
             AnimatedVisibility(
-                visible = !pdfSearch.active && pdfNavigation.indicatorVisible && pdfNavigation.pageCount > 1,
+                visible = !pdfSearch.active && !pdfNavigation.overviewOpen &&
+                    pdfNavigation.indicatorVisible && pdfNavigation.pageCount > 1,
                 enter = fadeIn(tween(PvotDurations.Short)),
                 exit = fadeOut(tween(PvotDurations.Medium))
             ) {
@@ -111,6 +143,7 @@ fun DocumentViewerScreen(
                 topPadding = padding.calculateTopPadding(),
                 search = pdfSearch,
                 navigation = pdfNavigation,
+                reading = pdfReading,
                 modifier = Modifier.fillMaxSize()
             )
         } else if (format == ViewerFormat.Docx) {
@@ -213,4 +246,17 @@ private fun prettyPrintJson(text: String): String {
             else -> text
         }
     }.getOrDefault(text)
+}
+
+/** What a document's reading position is remembered under: its name and size, rather than its
+ * URI. The same file reaches the viewer under different URIs — each "Open with" saves a fresh
+ * copy, and a folder can be re-added — but it keeps its name and size. Falls back to the URI when
+ * the size can't be read. */
+private fun readingKey(context: Context, uri: Uri, name: String): String {
+    val size = runCatching {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null
+        }
+    }.getOrNull()
+    return if (size != null && size > 0) "$name|$size" else uri.toString()
 }

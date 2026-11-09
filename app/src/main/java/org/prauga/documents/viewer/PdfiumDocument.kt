@@ -6,6 +6,7 @@ import android.graphics.RectF
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.util.LruCache
+import androidx.core.graphics.createBitmap
 import io.legere.pdfiumandroid.PdfDocument
 import io.legere.pdfiumandroid.PdfPage
 import io.legere.pdfiumandroid.PdfiumCore
@@ -18,6 +19,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import kotlin.math.roundToInt
 
 /** A page box in page-relative fractions: 0..1 across the page's displayed width and height, top
  * to bottom. Independent of how big the page is drawn, so it survives resizing and zoom. */
@@ -66,6 +68,12 @@ internal class PdfiumDocument private constructor(
         override fun sizeOf(key: Int, value: Bitmap) = value.allocationByteCount
     }
 
+    // Page overview thumbnails, kept apart from the full renders so browsing the grid doesn't
+    // evict the pages being read.
+    private val thumbnails = object : LruCache<Int, Bitmap>(ThumbnailCacheBytes) {
+        override fun sizeOf(key: Int, value: Bitmap) = value.allocationByteCount
+    }
+
     private val pageTexts = LruCache<Int, PageText>(TextCacheCount)
     private val pageLinkCache = LruCache<Int, List<PageLink>>(TextCacheCount)
 
@@ -79,9 +87,19 @@ internal class PdfiumDocument private constructor(
     /** The whole page at [widthPx] by [heightPx], form fields and annotations included. */
     suspend fun renderPage(index: Int, widthPx: Int, heightPx: Int): Bitmap = withContext(pdfium) {
         cachedPage(index, widthPx)?.let { return@withContext it }
-        val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
+        val bitmap = createBitmap(widthPx, heightPx)
         page(index).renderPageBitmap(bitmap, 0, 0, widthPx, heightPx, renderAnnot = true)
         pageBitmaps.put(index, bitmap)
+        bitmap
+    }
+
+    /** A small render of the whole page, [widthPx] wide, for the page overview. */
+    suspend fun renderThumbnail(index: Int, widthPx: Int): Bitmap = withContext(pdfium) {
+        thumbnails.get(index)?.takeIf { it.width == widthPx }?.let { return@withContext it }
+        val heightPx = (widthPx / pageAspects[index]).roundToInt().coerceAtLeast(1)
+        val bitmap = createBitmap(widthPx, heightPx)
+        page(index).renderPageBitmap(bitmap, 0, 0, widthPx, heightPx, renderAnnot = true)
+        thumbnails.put(index, bitmap)
         bitmap
     }
 
@@ -97,7 +115,7 @@ internal class PdfiumDocument private constructor(
         width: Int,
         height: Int,
     ): Bitmap = withContext(pdfium) {
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val bitmap = createBitmap(width, height)
         page(index).renderPageBitmap(bitmap, -left, -top, fullWidthPx, fullHeightPx, renderAnnot = true)
         bitmap
     }
@@ -182,6 +200,7 @@ internal class PdfiumDocument private constructor(
         scope.launch {
             openPages.evictAll()
             pageBitmaps.evictAll()
+            thumbnails.evictAll()
             doc.close()
             fd.close()
             scope.cancel()
@@ -217,6 +236,7 @@ internal class PdfiumDocument private constructor(
     companion object {
         private const val OpenPageCount = 4
         private const val TextCacheCount = 12
+        private const val ThumbnailCacheBytes = 24 * 1024 * 1024
         private const val MapperDeviceSize = 1_000_000
         private const val MapperStep = 1000.0
 

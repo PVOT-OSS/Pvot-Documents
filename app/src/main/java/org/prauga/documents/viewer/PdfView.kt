@@ -5,7 +5,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.foundation.gestures.animateScrollBy
 import android.content.ClipData
 import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FloatExponentialDecaySpec
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import com.prauga.pvot.designsystem.motion.PvotDurations
+import com.prauga.pvot.designsystem.motion.PvotMotion
+import org.prauga.documents.ReadingPosition
 import androidx.compose.animation.core.animateDecay
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -75,6 +85,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import org.prauga.documents.R
 import kotlin.math.abs
@@ -91,6 +104,7 @@ fun PdfView(
     topPadding: Dp,
     search: PdfSearchState,
     navigation: PdfNavigationState,
+    reading: PdfReadingSettings,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -150,6 +164,7 @@ fun PdfView(
             topPadding = topPadding,
             search = search,
             navigation = navigation,
+            reading = reading,
             modifier = modifier,
         )
     }
@@ -168,6 +183,7 @@ private fun PdfContent(
     topPadding: Dp,
     search: PdfSearchState,
     navigation: PdfNavigationState,
+    reading: PdfReadingSettings,
     modifier: Modifier,
 ) {
     val zoom = remember(document) { PdfZoomState() }
@@ -324,6 +340,69 @@ private fun PdfContent(
         }
     }
 
+    // Reopening a document picks up where reading stopped. Nothing is saved until the old
+    // position has been restored, so the first frame at page 1 can't overwrite it.
+    var positionRestored by remember(document) { mutableStateOf(false) }
+    LaunchedEffect(document) {
+        reading.initialPosition?.takeIf { it.page in 0 until document.pageCount }?.let { position ->
+            listState.scrollToItem(position.page)
+            // The offset is a fraction of the page's height, known once the page has been laid out.
+            val size = withTimeoutOrNull(RestoreLayoutTimeoutMillis) {
+                snapshotFlow { listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == position.page }?.size }
+                    .filterNotNull()
+                    .first()
+            } ?: 0
+            listState.scrollToItem(position.page, (position.offsetFraction * size).roundToInt())
+        }
+        positionRestored = true
+    }
+    fun currentPosition(): ReadingPosition? {
+        if (!positionRestored) return null
+        val first = listState.layoutInfo.visibleItemsInfo.firstOrNull() ?: return null
+        val offset = listState.firstVisibleItemScrollOffset.toFloat() / first.size.coerceAtLeast(1)
+        return ReadingPosition(listState.firstVisibleItemIndex, offset.coerceIn(0f, 1f))
+    }
+    val savePosition = rememberUpdatedState(reading.onPositionChange)
+    LaunchedEffect(document) {
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collectLatest {
+                delay(SavePositionMillis)
+                currentPosition()?.let(savePosition.value)
+            }
+    }
+    DisposableEffect(document) {
+        onDispose { currentPosition()?.let(savePosition.value) }
+    }
+
+    // The list's box on screen, before the zoom transform, to place double taps in.
+    val listCoordinates = remember { CoordinatesHolder() }
+    var zoomJob by remember { mutableStateOf<Job?>(null) }
+
+    /** Double tap: zoom in around the tapped point, or back out to the whole page if zoomed. */
+    fun toggleZoomAt(windowPosition: Offset) {
+        val coords = listCoordinates.value?.takeIf { it.isAttached } ?: return
+        val point = coords.windowToLocal(windowPosition)
+        val width = coords.size.width.toFloat()
+        val height = coords.size.height.toFloat()
+        val fromCentre = point - Offset(width / 2f, height / 2f)
+        val startScale = zoom.scale
+        val startX = zoom.offsetX
+        val startY = zoom.offsetY
+        val target = if (startScale > 1.01f) 1f else DoubleTapZoom
+        zoomJob?.cancel()
+        zoomJob = scope.launch {
+            animate(startScale, target, animationSpec = tween(PvotDurations.Medium, easing = PvotMotion.Settle)) { value, _ ->
+                // Same anchoring as a pinch: the tapped point stays under the finger.
+                val ratio = value / startScale
+                val maxX = width * (value - 1f) / 2f
+                val maxY = height * (value - 1f) / 2f
+                zoom.scale = value
+                zoom.offsetX = (fromCentre.x - (fromCentre.x - startX) * ratio).coerceIn(-maxX, maxX)
+                zoom.offsetY = (fromCentre.y - (fromCentre.y - startY) * ratio).coerceIn(-maxY, maxY)
+            }
+        }
+    }
+
     var pendingLink by remember(document) { mutableStateOf<String?>(null) }
     pendingLink?.let { link -> OpenLinkDialog(link, onDismiss = { pendingLink = null }) }
 
@@ -332,6 +411,7 @@ private fun PdfContent(
             state = listState,
             modifier = Modifier
                 .fillMaxWidth()
+                .onGloballyPositioned { listCoordinates.value = it }
                 // The gesture sits outside graphicsLayer so it sees finger movement in screen
                 // pixels. Inside the layer, movement arrives divided by the zoom factor, and a
                 // page at 4x would only pan a quarter as far as the finger moved.
@@ -367,6 +447,8 @@ private fun PdfContent(
                         selectionPage = if (sel == null) -1 else index
                         selection = sel
                     },
+                    pageFilter = reading.pageFilter,
+                    onDoubleTap = ::toggleZoomAt,
                     onLinkTap = { link ->
                         val dest = link.destPage
                         if (dest != null) navigation.goToPage(dest) else pendingLink = link.uri
@@ -379,8 +461,54 @@ private fun PdfContent(
                 )
             }
         }
+        AnimatedVisibility(
+            visible = navigation.overviewOpen,
+            enter = fadeIn(tween(PvotDurations.Medium, easing = PvotMotion.Settle)),
+            exit = fadeOut(tween(PvotDurations.Short)),
+        ) {
+            PdfPageOverview(
+                document = document,
+                currentPage = navigation.currentPage,
+                topPadding = topPadding,
+                pageFilter = reading.pageFilter,
+                onPick = { page ->
+                    navigation.overviewOpen = false
+                    navigation.goToPage(page)
+                },
+                onClose = { navigation.overviewOpen = false },
+            )
+        }
     }
 }
+
+/** How the reader wants PDFs shown, from the app's preferences: where to start reading, where
+ * reading stopped (to remember), and the dark-pages filter, null for normal pages. */
+class PdfReadingSettings(
+    val initialPosition: ReadingPosition?,
+    val onPositionChange: (ReadingPosition) -> Unit,
+    val pageFilter: ColorFilter?,
+)
+
+/** Inverts lightness while keeping hue (an inversion followed by a 180° hue turn), so black text
+ * on white turns light on black but red stays red and blue stays blue. Each row sums to -1 on the
+ * colour channels with an offset of 255: white maps to black and black to white. */
+internal val DarkPageFilter = ColorFilter.colorMatrix(
+    ColorMatrix(
+        floatArrayOf(
+            0.574f, -1.430f, -0.144f, 0f, 255f,
+            -0.426f, -0.430f, -0.144f, 0f, 255f,
+            -0.426f, -1.430f, 0.856f, 0f, 255f,
+            0f, 0f, 0f, 1f, 0f,
+        )
+    )
+)
+
+/** The colour of a page before (or under) its render: paper white, or black with dark pages. */
+internal fun pagePaper(dark: Boolean): Color = if (dark) Color.Black else Color.White
+
+private const val DoubleTapZoom = 2.5f
+private const val SavePositionMillis = 1000L
+private const val RestoreLayoutTimeoutMillis = 1000L
 
 private val SearchBarClearance = 96.dp
 private const val SearchDebounceMillis = 250L
@@ -506,6 +634,8 @@ private fun PdfPageItem(
     currentHighlight: List<PageRect>?,
     selection: PageSelection?,
     onSelectionChange: (PageSelection?) -> Unit,
+    pageFilter: ColorFilter?,
+    onDoubleTap: (windowPosition: Offset) -> Unit,
     onLinkTap: (PageLink) -> Unit,
     onCopy: (String) -> Unit,
 ) {
@@ -574,8 +704,9 @@ private fun PdfPageItem(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(document.pageAspects[index])
-                // An unpainted PDF page is white; this also shows while the page renders.
-                .background(Color.White)
+                // An unpainted PDF page is white (black in dark pages); this also shows while the
+                // page renders.
+                .background(pagePaper(pageFilter != null))
                 .onSizeChanged { size = it }
                 .onGloballyPositioned { coordinates.value = it }
                 .pointerInput(index) {
@@ -603,7 +734,11 @@ private fun PdfPageItem(
                     )
                 }
                 .pointerInput(index) {
-                    detectTapGestures(onTap = { position ->
+                    detectTapGestures(
+                        onDoubleTap = { position ->
+                            coordinates.value?.takeIf { it.isAttached }?.let { onDoubleTap(it.localToWindow(position)) }
+                        },
+                        onTap = { position ->
                         if (currentSelection.value != null) {
                             onSelectionChange(null)
                             return@detectTapGestures
@@ -617,16 +752,18 @@ private fun PdfPageItem(
                                 position.y >= r.top * size.height - linkSlopPx &&
                                 position.y <= r.bottom * size.height + linkSlopPx
                         }?.let(onLinkTap)
-                    })
+                    },
+                    )
                 },
         ) {
             Canvas(modifier = Modifier.matchParentSize()) {
-                page?.let { drawImage(it) }
+                page?.let { drawImage(it, colorFilter = pageFilter) }
                 tile?.let {
                     drawImage(
                         image = it.image,
                         dstOffset = IntOffset(it.bounds.left.roundToInt(), it.bounds.top.roundToInt()),
                         dstSize = IntSize(it.bounds.width.roundToInt(), it.bounds.height.roundToInt()),
+                        colorFilter = pageFilter,
                     )
                 }
                 for (r in highlights) drawRect(highlightColor, r.topLeft(this.size), r.size(this.size))

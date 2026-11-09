@@ -39,6 +39,14 @@
     <string name="viewer_pdf_password_label">Password</string>
     <string name="viewer_pdf_password_wrong">Wrong password. Try again</string>
     <string name="viewer_pdf_password_open">Open</string>
+    <string name="viewer_pdf_more">View options</string>
+    <string name="viewer_pdf_pages">Pages</string>
+    <string name="viewer_pdf_pages_summary">All pages at a glance</string>
+    <string name="viewer_pdf_go_to_summary">Jump to a page number</string>
+    <string name="viewer_pdf_dark_pages">Dark pages</string>
+    <string name="viewer_pdf_dark_pages_summary">Invert page colors for reading in the dark</string>
+    <string name="viewer_pdf_page_number">%1$d</string>
+    <string name="viewer_pdf_page_thumbnail">Page %1$d</string>
     <string name="recent_no_filter_results">No %1$s documents in Recent.</string>
     <string name="document_kind_pdf">PDF</string>
     <string name="document_kind_word">Word</string>

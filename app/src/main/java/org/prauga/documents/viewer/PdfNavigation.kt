@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -33,6 +35,7 @@ import com.prauga.pvot.designsystem.components.PvotDialogAction
 import com.prauga.pvot.designsystem.components.PvotDialogActionStyle
 import com.prauga.pvot.designsystem.components.PvotSheetItem
 import com.prauga.pvot.designsystem.components.pvotGlassSurface
+import com.prauga.pvot.designsystem.components.list.PvotSwitchRow
 import com.prauga.pvot.designsystem.components.textfield.PvotTextField
 import com.prauga.pvot.designsystem.effects.LocalPvotGlassBackdrop
 import com.prauga.pvot.designsystem.effects.PvotGlassDefaults
@@ -61,6 +64,9 @@ class PdfNavigationState {
      * once it has been still for a moment. */
     var indicatorVisible by mutableStateOf(false)
         internal set
+
+    /** Whether the page overview (every page as a thumbnail) is showing over the document. */
+    var overviewOpen by mutableStateOf(false)
 
     internal var goTo: (pageIndex: Int) -> Unit = {}
 
@@ -170,3 +176,41 @@ fun PdfContentsSheet(state: PdfNavigationState, onDismiss: () -> Unit) {
 /** Deeper levels stop indenting, so a deeply nested outline doesn't squeeze titles to nothing. */
 private const val MaxIndentLevels = 3
 
+/** The viewer's less frequent options, behind the top bar's "more": the page overview, go to
+ * page, and dark pages, which is remembered for every PDF. */
+@Composable
+fun PdfViewOptionsSheet(
+    darkPages: Boolean,
+    onDarkPagesChange: (Boolean) -> Unit,
+    onPages: () -> Unit,
+    onGoToPage: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    PvotBottomSheet(visible = true, onDismissRequest = onDismiss) {
+        PvotSheetItem(
+            title = stringResource(R.string.viewer_pdf_pages),
+            subtitle = stringResource(R.string.viewer_pdf_pages_summary),
+            icon = { Icon(painterResource(R.drawable.ic_layout_grid), contentDescription = null) },
+            onClick = {
+                onDismiss()
+                onPages()
+            },
+        )
+        PvotSheetItem(
+            title = stringResource(R.string.viewer_pdf_go_to_title),
+            subtitle = stringResource(R.string.viewer_pdf_go_to_summary),
+            icon = { Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null) },
+            onClick = {
+                onDismiss()
+                onGoToPage()
+            },
+        )
+        PvotSwitchRow(
+            title = stringResource(R.string.viewer_pdf_dark_pages),
+            summary = stringResource(R.string.viewer_pdf_dark_pages_summary),
+            checked = darkPages,
+            onCheckedChange = onDarkPagesChange,
+            icon = { Icon(painterResource(R.drawable.ic_moon), contentDescription = null) },
+        )
+    }
+}
